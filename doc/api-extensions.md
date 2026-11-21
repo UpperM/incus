@@ -3647,3 +3647,8 @@ Adds the `target` query parameter to `GET /1.0/events` to get the event stream o
 ## `network_ovn_parent_shared`
 
 The `parent` of an OVN network can now be a network of the default project shared into the network's project through `restricted.networks.access`.
+## `storage_volume_backup_import`
+
+Adds a `backup` source type to `POST /1.0/storage-pools/{poolName}/volumes/custom`, which has the server download a custom volume backup from an HTTP or HTTPS URL (`source.backup.url`) and import it.
+
+This also adds the `restricted.backups.servers` project option, the list of servers a restricted project may import backups from.

@@ -607,6 +607,7 @@ var APIExtensions = []string{
 	"network_dns_domain_none",
 	"events_target",
 	"network_ovn_parent_shared",
+	"storage_volume_backup_import",
 }
 
 // APIExtensionsCount returns the number of available API extensions.
