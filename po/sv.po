@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: incus\n"
 "Report-Msgid-Bugs-To: lxc-devel@lists.linuxcontainers.org\n"
-"POT-Creation-Date: 2026-11-24 19:52-0500\n"
-"PO-Revision-Date: 2026-11-24 19:14+0000\n"
+"POT-Creation-Date: 2026-11-24 21:58-0500\n"
+"PO-Revision-Date: 2026-11-24 00:59+0000\n"
 "Last-Translator: Anonymous <anonymous@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Swedish <https://hosted.weblate.org/projects/incus/cli/sv/>\n"
 "Language: sv\n"
@@ -1835,7 +1835,7 @@ msgstr "Klustermedlem %s borttagen från grupp %s"
 #: cmd/incus/storage_volume.go:1291 cmd/incus/storage_volume.go:1733
 #: cmd/incus/storage_volume.go:1817 cmd/incus/storage_volume.go:1898
 #: cmd/incus/storage_volume.go:2048 cmd/incus/storage_volume.go:2138
-#: cmd/incus/storage_volume.go:2194 cmd/incus/storage_volume.go:2402
+#: cmd/incus/storage_volume.go:2194 cmd/incus/storage_volume.go:2405
 #: cmd/incus/storage_volume_bitmap.go:76 cmd/incus/storage_volume_bitmap.go:141
 #: cmd/incus/storage_volume_bitmap.go:209
 #: cmd/incus/storage_volume_bitmap.go:278
@@ -3532,7 +3532,7 @@ msgid "Failed starting sshfs: %w"
 msgstr "Misslyckades med att starta sshfs: %w"
 
 #: cmd/incus/low_level.go:335 cmd/incus/port_forward.go:128
-#: cmd/incus/storage_volume.go:2595 cmd/incus/utils.go:641
+#: cmd/incus/storage_volume.go:2635 cmd/incus/utils.go:641
 #, c-format
 msgid "Failed to accept incoming connection: %w"
 msgstr "Det gick inte att acceptera inkommande anslutning: %w"
@@ -3695,7 +3695,7 @@ msgid "Failed to list bitmaps: %w"
 msgstr "Misslyckades med att begära dump: %w"
 
 #: cmd/incus/low_level.go:320 cmd/incus/port_forward.go:114
-#: cmd/incus/storage_volume.go:2587 cmd/incus/utils.go:626
+#: cmd/incus/storage_volume.go:2627 cmd/incus/utils.go:626
 #, c-format
 msgid "Failed to listen for connection: %w"
 msgstr "Misslyckades med att lyssna efter anslutning: %w"
@@ -4425,7 +4425,7 @@ msgstr ""
 "lägger du till snapshotnamnet (endast om typen är custom, container eller "
 "virtual-machine)."
 
-#: cmd/incus/storage_volume.go:2540
+#: cmd/incus/storage_volume.go:2580
 msgid "Get write access to the disk"
 msgstr "Få skrivåtkomst till disken"
 
@@ -4727,11 +4727,11 @@ msgstr "Importera instansbackuper"
 msgid "Import storage bucket"
 msgstr "Importera lagringsbehållare"
 
-#: cmd/incus/storage_volume.go:2464
+#: cmd/incus/storage_volume.go:2504
 msgid "Import type needs to be \"backup\" or \"iso\""
 msgstr "Importtypen måste vara \"backup\" eller \"iso\""
 
-#: cmd/incus/storage_volume.go:2404
+#: cmd/incus/storage_volume.go:2407
 msgid "Import type, backup or iso (default \"backup\")"
 msgstr "Importtyp, säkerhetskopia eller iso (standard \"säkerhetskopia\")"
 
@@ -4740,10 +4740,14 @@ msgstr "Importtyp, säkerhetskopia eller iso (standard \"säkerhetskopia\")"
 msgid "Importing bucket: %s"
 msgstr "Importerar bucket: %s"
 
-#: cmd/incus/storage_volume.go:2473
+#: cmd/incus/storage_volume.go:2444 cmd/incus/storage_volume.go:2513
 #, c-format
 msgid "Importing custom volume: %s"
 msgstr "Importera anpassad volym: %s"
+
+#: cmd/incus/storage_volume.go:2440
+msgid "Importing from a URL is only supported for backup imports"
+msgstr ""
 
 #: cmd/incus/import.go:92
 #, c-format
@@ -6352,7 +6356,7 @@ msgstr "NAMN"
 msgid "NAT"
 msgstr "NAT"
 
-#: cmd/incus/storage_volume.go:2534 cmd/incus/storage_volume.go:2535
+#: cmd/incus/storage_volume.go:2574 cmd/incus/storage_volume.go:2575
 msgid "NBD access to a block storage volume"
 msgstr "NBD-åtkomst till en blocklagringsvolym"
 
@@ -6376,22 +6380,22 @@ msgstr ""
 " NBD-server, där varje disk kan nås som en NBD-export uppkallad efter \n"
 "dess Incus-enhetsnamn."
 
-#: cmd/incus/low_level.go:341 cmd/incus/storage_volume.go:2600
+#: cmd/incus/low_level.go:341 cmd/incus/storage_volume.go:2640
 #, c-format
 msgid "NBD client connected %q"
 msgstr "NBD-klient ansluten %q"
 
-#: cmd/incus/low_level.go:342 cmd/incus/storage_volume.go:2601
+#: cmd/incus/low_level.go:342 cmd/incus/storage_volume.go:2641
 #, c-format
 msgid "NBD client disconnected %q"
 msgstr "NBD-klienten frånkopplad %q"
 
-#: cmd/incus/low_level.go:358 cmd/incus/storage_volume.go:2606
+#: cmd/incus/low_level.go:358 cmd/incus/storage_volume.go:2646
 #, c-format
 msgid "NBD connection failed: %v"
 msgstr "NBD-anslutning misslyckades: %v"
 
-#: cmd/incus/low_level.go:323 cmd/incus/storage_volume.go:2590
+#: cmd/incus/low_level.go:323 cmd/incus/storage_volume.go:2630
 #, c-format
 msgid "NBD listening on %v"
 msgstr "NBD lyssnar på %v"
@@ -8687,7 +8691,7 @@ msgstr ""
 msgid "Source:"
 msgstr "Källa:"
 
-#: cmd/incus/low_level.go:280 cmd/incus/storage_volume.go:2539
+#: cmd/incus/low_level.go:280 cmd/incus/storage_volume.go:2579
 msgid "Specific address to listen on"
 msgstr "Specifik adress att lyssna på"
 
@@ -11540,9 +11544,15 @@ msgstr ""
 "poolen \"default\""
 
 #: cmd/incus/storage_volume.go:2397
+#, fuzzy
 msgid ""
 "incus storage volume import default backup0.tar.gz\n"
 "    Create a new custom volume using backup0.tar.gz as the source\n"
+"\n"
+"incus storage volume import default https://example.com/backup0.tar.gz "
+"myvol\n"
+"    Create a new custom volume by having the server download backup0.tar.gz "
+"directly\n"
 "\n"
 "incus storage volume import default some-installer.iso installer --type=iso\n"
 "    Create a new custom volume storing some-installer.iso for use as a CD-"

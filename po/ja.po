@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: LXD\n"
 "Report-Msgid-Bugs-To: lxc-devel@lists.linuxcontainers.org\n"
-"POT-Creation-Date: 2026-11-24 19:52-0500\n"
-"PO-Revision-Date: 2026-11-24 19:13+0000\n"
+"POT-Creation-Date: 2026-11-24 21:58-0500\n"
+"PO-Revision-Date: 2026-11-24 00:58+0000\n"
 "Last-Translator: KATOH Yasufumi "
 "<tenforward@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Japanese <https://hosted.weblate.org/projects/incus/cli/ja/>\n"
@@ -1833,7 +1833,7 @@ msgstr "クラスターメンバー %s がグループ %s から削除されま�
 #: cmd/incus/storage_volume.go:1291 cmd/incus/storage_volume.go:1733
 #: cmd/incus/storage_volume.go:1817 cmd/incus/storage_volume.go:1898
 #: cmd/incus/storage_volume.go:2048 cmd/incus/storage_volume.go:2138
-#: cmd/incus/storage_volume.go:2194 cmd/incus/storage_volume.go:2402
+#: cmd/incus/storage_volume.go:2194 cmd/incus/storage_volume.go:2405
 #: cmd/incus/storage_volume_bitmap.go:76 cmd/incus/storage_volume_bitmap.go:141
 #: cmd/incus/storage_volume_bitmap.go:209
 #: cmd/incus/storage_volume_bitmap.go:278
@@ -3523,7 +3523,7 @@ msgid "Failed starting sshfs: %w"
 msgstr "sshfs の起動に失敗しました: %w"
 
 #: cmd/incus/low_level.go:335 cmd/incus/port_forward.go:128
-#: cmd/incus/storage_volume.go:2595 cmd/incus/utils.go:641
+#: cmd/incus/storage_volume.go:2635 cmd/incus/utils.go:641
 #, c-format
 msgid "Failed to accept incoming connection: %w"
 msgstr "受信接続の受け入れに失敗しました: %w"
@@ -3684,7 +3684,7 @@ msgid "Failed to list bitmaps: %w"
 msgstr "ダンプのリクエストに失敗しました: %w"
 
 #: cmd/incus/low_level.go:320 cmd/incus/port_forward.go:114
-#: cmd/incus/storage_volume.go:2587 cmd/incus/utils.go:626
+#: cmd/incus/storage_volume.go:2627 cmd/incus/utils.go:626
 #, c-format
 msgid "Failed to listen for connection: %w"
 msgstr "コネクションのリッスンに失敗しました: %w"
@@ -4399,7 +4399,7 @@ msgstr ""
 "lxc storage volume edit [<remote>:]<pool> <volume> < volume.yaml\n"
 "    pool.yaml の内容でストレージボリュームを更新します。"
 
-#: cmd/incus/storage_volume.go:2540
+#: cmd/incus/storage_volume.go:2580
 #, fuzzy
 msgid "Get write access to the disk"
 msgstr "ディスクへの書き込みアクセス権を取得する"
@@ -4713,12 +4713,12 @@ msgstr "インスタンスのバックアップをインポートします"
 msgid "Import storage bucket"
 msgstr "ストレージバケットを一覧表示します"
 
-#: cmd/incus/storage_volume.go:2464
+#: cmd/incus/storage_volume.go:2504
 msgid "Import type needs to be \"backup\" or \"iso\""
 msgstr ""
 "インポートするタイプは \"backup\" もしくは \"iso\" である必要があります"
 
-#: cmd/incus/storage_volume.go:2404
+#: cmd/incus/storage_volume.go:2407
 msgid "Import type, backup or iso (default \"backup\")"
 msgstr "インポートするタイプ。backup もしくは iso (デフォルト \\\"backup\\\")"
 
@@ -4727,10 +4727,14 @@ msgstr "インポートするタイプ。backup もしくは iso (デフォル�
 msgid "Importing bucket: %s"
 msgstr "インスタンスのインポート中: %s"
 
-#: cmd/incus/storage_volume.go:2473
+#: cmd/incus/storage_volume.go:2444 cmd/incus/storage_volume.go:2513
 #, c-format
 msgid "Importing custom volume: %s"
 msgstr "カスタムボリュームのインポート中: %s"
+
+#: cmd/incus/storage_volume.go:2440
+msgid "Importing from a URL is only supported for backup imports"
+msgstr ""
 
 #: cmd/incus/import.go:92
 #, c-format
@@ -6364,7 +6368,7 @@ msgstr "NAME"
 msgid "NAT"
 msgstr "NAT"
 
-#: cmd/incus/storage_volume.go:2534 cmd/incus/storage_volume.go:2535
+#: cmd/incus/storage_volume.go:2574 cmd/incus/storage_volume.go:2575
 #, fuzzy
 msgid "NBD access to a block storage volume"
 msgstr "カスタムストレージボリュームを削除します"
@@ -6389,22 +6393,22 @@ msgstr ""
 "由で公開されます。各ディスクには Incus のデバイス名に基づいた名前の NBD エク"
 "スポートとしてアクセスできるようになります。"
 
-#: cmd/incus/low_level.go:341 cmd/incus/storage_volume.go:2600
+#: cmd/incus/low_level.go:341 cmd/incus/storage_volume.go:2640
 #, fuzzy, c-format
 msgid "NBD client connected %q"
 msgstr "SSH クライアントが %q に接続されました"
 
-#: cmd/incus/low_level.go:342 cmd/incus/storage_volume.go:2601
+#: cmd/incus/low_level.go:342 cmd/incus/storage_volume.go:2641
 #, fuzzy, c-format
 msgid "NBD client disconnected %q"
 msgstr "SSH クライアントが切断されました %q"
 
-#: cmd/incus/low_level.go:358 cmd/incus/storage_volume.go:2606
+#: cmd/incus/low_level.go:358 cmd/incus/storage_volume.go:2646
 #, fuzzy, c-format
 msgid "NBD connection failed: %v"
 msgstr "NBD接続が失敗しました: %v"
 
-#: cmd/incus/low_level.go:323 cmd/incus/storage_volume.go:2590
+#: cmd/incus/low_level.go:323 cmd/incus/storage_volume.go:2630
 #, fuzzy, c-format
 msgid "NBD listening on %v"
 msgstr "SSH SFTP は %v でリッスンしています"
@@ -8780,7 +8784,7 @@ msgstr ""
 msgid "Source:"
 msgstr "取得元:"
 
-#: cmd/incus/low_level.go:280 cmd/incus/storage_volume.go:2539
+#: cmd/incus/low_level.go:280 cmd/incus/storage_volume.go:2579
 #, fuzzy
 msgid "Specific address to listen on"
 msgstr "聴くための特定のアドレス"
@@ -11687,9 +11691,15 @@ msgstr ""
 "    pool.yaml の内容でストレージボリュームを更新します。"
 
 #: cmd/incus/storage_volume.go:2397
+#, fuzzy
 msgid ""
 "incus storage volume import default backup0.tar.gz\n"
 "    Create a new custom volume using backup0.tar.gz as the source\n"
+"\n"
+"incus storage volume import default https://example.com/backup0.tar.gz "
+"myvol\n"
+"    Create a new custom volume by having the server download backup0.tar.gz "
+"directly\n"
 "\n"
 "incus storage volume import default some-installer.iso installer --type=iso\n"
 "    Create a new custom volume storing some-installer.iso for use as a CD-"

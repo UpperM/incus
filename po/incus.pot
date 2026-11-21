@@ -7,7 +7,7 @@
 msgid   ""
 msgstr  "Project-Id-Version: incus\n"
         "Report-Msgid-Bugs-To: lxc-devel@lists.linuxcontainers.org\n"
-        "POT-Creation-Date: 2026-11-24 19:52-0500\n"
+        "POT-Creation-Date: 2026-11-24 21:58-0500\n"
         "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
         "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
         "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1415,7 +1415,7 @@ msgstr  ""
 msgid   "Cluster member %s removed from group %s"
 msgstr  ""
 
-#: cmd/incus/config.go:105 cmd/incus/config.go:387 cmd/incus/config.go:524 cmd/incus/config.go:692 cmd/incus/config.go:816 cmd/incus/copy.go:68 cmd/incus/create.go:70 cmd/incus/info.go:59 cmd/incus/monitor.go:64 cmd/incus/move.go:71 cmd/incus/network.go:346 cmd/incus/network.go:801 cmd/incus/network.go:875 cmd/incus/network.go:1043 cmd/incus/network.go:1283 cmd/incus/network.go:1367 cmd/incus/network.go:1429 cmd/incus/network_forward.go:168 cmd/incus/network_forward.go:239 cmd/incus/network_forward.go:400 cmd/incus/network_forward.go:539 cmd/incus/network_forward.go:681 cmd/incus/network_forward.go:759 cmd/incus/network_forward.go:832 cmd/incus/network_load_balancer.go:171 cmd/incus/network_load_balancer.go:242 cmd/incus/network_load_balancer.go:386 cmd/incus/network_load_balancer.go:508 cmd/incus/network_load_balancer.go:661 cmd/incus/network_load_balancer.go:738 cmd/incus/network_load_balancer.go:803 cmd/incus/network_load_balancer.go:897 cmd/incus/network_load_balancer.go:963 cmd/incus/storage.go:112 cmd/incus/storage.go:392 cmd/incus/storage.go:469 cmd/incus/storage.go:722 cmd/incus/storage.go:816 cmd/incus/storage.go:896 cmd/incus/storage_bucket.go:114 cmd/incus/storage_bucket.go:203 cmd/incus/storage_bucket.go:253 cmd/incus/storage_bucket.go:372 cmd/incus/storage_bucket.go:523 cmd/incus/storage_bucket.go:629 cmd/incus/storage_bucket.go:682 cmd/incus/storage_bucket.go:754 cmd/incus/storage_bucket.go:828 cmd/incus/storage_bucket.go:918 cmd/incus/storage_bucket.go:967 cmd/incus/storage_bucket.go:1089 cmd/incus/storage_bucket.go:1149 cmd/incus/storage_bucket.go:1330 cmd/incus/storage_volume.go:606 cmd/incus/storage_volume.go:701 cmd/incus/storage_volume.go:961 cmd/incus/storage_volume.go:1173 cmd/incus/storage_volume.go:1291 cmd/incus/storage_volume.go:1733 cmd/incus/storage_volume.go:1817 cmd/incus/storage_volume.go:1898 cmd/incus/storage_volume.go:2048 cmd/incus/storage_volume.go:2138 cmd/incus/storage_volume.go:2194 cmd/incus/storage_volume.go:2402 cmd/incus/storage_volume_bitmap.go:76 cmd/incus/storage_volume_bitmap.go:141 cmd/incus/storage_volume_bitmap.go:209 cmd/incus/storage_volume_bitmap.go:278 cmd/incus/storage_volume_snapshot.go:97 cmd/incus/storage_volume_snapshot.go:245 cmd/incus/storage_volume_snapshot.go:404 cmd/incus/storage_volume_snapshot.go:473 cmd/incus/storage_volume_snapshot.go:538
+#: cmd/incus/config.go:105 cmd/incus/config.go:387 cmd/incus/config.go:524 cmd/incus/config.go:692 cmd/incus/config.go:816 cmd/incus/copy.go:68 cmd/incus/create.go:70 cmd/incus/info.go:59 cmd/incus/monitor.go:64 cmd/incus/move.go:71 cmd/incus/network.go:346 cmd/incus/network.go:801 cmd/incus/network.go:875 cmd/incus/network.go:1043 cmd/incus/network.go:1283 cmd/incus/network.go:1367 cmd/incus/network.go:1429 cmd/incus/network_forward.go:168 cmd/incus/network_forward.go:239 cmd/incus/network_forward.go:400 cmd/incus/network_forward.go:539 cmd/incus/network_forward.go:681 cmd/incus/network_forward.go:759 cmd/incus/network_forward.go:832 cmd/incus/network_load_balancer.go:171 cmd/incus/network_load_balancer.go:242 cmd/incus/network_load_balancer.go:386 cmd/incus/network_load_balancer.go:508 cmd/incus/network_load_balancer.go:661 cmd/incus/network_load_balancer.go:738 cmd/incus/network_load_balancer.go:803 cmd/incus/network_load_balancer.go:897 cmd/incus/network_load_balancer.go:963 cmd/incus/storage.go:112 cmd/incus/storage.go:392 cmd/incus/storage.go:469 cmd/incus/storage.go:722 cmd/incus/storage.go:816 cmd/incus/storage.go:896 cmd/incus/storage_bucket.go:114 cmd/incus/storage_bucket.go:203 cmd/incus/storage_bucket.go:253 cmd/incus/storage_bucket.go:372 cmd/incus/storage_bucket.go:523 cmd/incus/storage_bucket.go:629 cmd/incus/storage_bucket.go:682 cmd/incus/storage_bucket.go:754 cmd/incus/storage_bucket.go:828 cmd/incus/storage_bucket.go:918 cmd/incus/storage_bucket.go:967 cmd/incus/storage_bucket.go:1089 cmd/incus/storage_bucket.go:1149 cmd/incus/storage_bucket.go:1330 cmd/incus/storage_volume.go:606 cmd/incus/storage_volume.go:701 cmd/incus/storage_volume.go:961 cmd/incus/storage_volume.go:1173 cmd/incus/storage_volume.go:1291 cmd/incus/storage_volume.go:1733 cmd/incus/storage_volume.go:1817 cmd/incus/storage_volume.go:1898 cmd/incus/storage_volume.go:2048 cmd/incus/storage_volume.go:2138 cmd/incus/storage_volume.go:2194 cmd/incus/storage_volume.go:2405 cmd/incus/storage_volume_bitmap.go:76 cmd/incus/storage_volume_bitmap.go:141 cmd/incus/storage_volume_bitmap.go:209 cmd/incus/storage_volume_bitmap.go:278 cmd/incus/storage_volume_snapshot.go:97 cmd/incus/storage_volume_snapshot.go:245 cmd/incus/storage_volume_snapshot.go:404 cmd/incus/storage_volume_snapshot.go:473 cmd/incus/storage_volume_snapshot.go:538
 msgid   "Cluster member name"
 msgstr  ""
 
@@ -2832,7 +2832,7 @@ msgstr  ""
 msgid   "Failed starting sshfs: %w"
 msgstr  ""
 
-#: cmd/incus/low_level.go:335 cmd/incus/port_forward.go:128 cmd/incus/storage_volume.go:2595 cmd/incus/utils.go:641
+#: cmd/incus/low_level.go:335 cmd/incus/port_forward.go:128 cmd/incus/storage_volume.go:2635 cmd/incus/utils.go:641
 #, c-format
 msgid   "Failed to accept incoming connection: %w"
 msgstr  ""
@@ -2991,7 +2991,7 @@ msgstr  ""
 msgid   "Failed to list bitmaps: %w"
 msgstr  ""
 
-#: cmd/incus/low_level.go:320 cmd/incus/port_forward.go:114 cmd/incus/storage_volume.go:2587 cmd/incus/utils.go:626
+#: cmd/incus/low_level.go:320 cmd/incus/port_forward.go:114 cmd/incus/storage_volume.go:2627 cmd/incus/utils.go:626
 #, c-format
 msgid   "Failed to listen for connection: %w"
 msgstr  ""
@@ -3596,7 +3596,7 @@ msgid   "Get values for storage volume configuration keys\n"
         "For snapshots, add the snapshot name (only if type is one of custom, container or virtual-machine)."
 msgstr  ""
 
-#: cmd/incus/storage_volume.go:2540
+#: cmd/incus/storage_volume.go:2580
 msgid   "Get write access to the disk"
 msgstr  ""
 
@@ -3873,11 +3873,11 @@ msgstr  ""
 msgid   "Import storage bucket"
 msgstr  ""
 
-#: cmd/incus/storage_volume.go:2464
+#: cmd/incus/storage_volume.go:2504
 msgid   "Import type needs to be \"backup\" or \"iso\""
 msgstr  ""
 
-#: cmd/incus/storage_volume.go:2404
+#: cmd/incus/storage_volume.go:2407
 msgid   "Import type, backup or iso (default \"backup\")"
 msgstr  ""
 
@@ -3886,9 +3886,13 @@ msgstr  ""
 msgid   "Importing bucket: %s"
 msgstr  ""
 
-#: cmd/incus/storage_volume.go:2473
+#: cmd/incus/storage_volume.go:2444 cmd/incus/storage_volume.go:2513
 #, c-format
 msgid   "Importing custom volume: %s"
+msgstr  ""
+
+#: cmd/incus/storage_volume.go:2440
+msgid   "Importing from a URL is only supported for backup imports"
 msgstr  ""
 
 #: cmd/incus/import.go:92
@@ -5132,7 +5136,7 @@ msgstr  ""
 msgid   "NAT"
 msgstr  ""
 
-#: cmd/incus/storage_volume.go:2534 cmd/incus/storage_volume.go:2535
+#: cmd/incus/storage_volume.go:2574 cmd/incus/storage_volume.go:2575
 msgid   "NBD access to a block storage volume"
 msgstr  ""
 
@@ -5148,22 +5152,22 @@ msgid   "NBD access to a virtual machine's root and dependent disks\n"
         "its Incus device name."
 msgstr  ""
 
-#: cmd/incus/low_level.go:341 cmd/incus/storage_volume.go:2600
+#: cmd/incus/low_level.go:341 cmd/incus/storage_volume.go:2640
 #, c-format
 msgid   "NBD client connected %q"
 msgstr  ""
 
-#: cmd/incus/low_level.go:342 cmd/incus/storage_volume.go:2601
+#: cmd/incus/low_level.go:342 cmd/incus/storage_volume.go:2641
 #, c-format
 msgid   "NBD client disconnected %q"
 msgstr  ""
 
-#: cmd/incus/low_level.go:358 cmd/incus/storage_volume.go:2606
+#: cmd/incus/low_level.go:358 cmd/incus/storage_volume.go:2646
 #, c-format
 msgid   "NBD connection failed: %v"
 msgstr  ""
 
-#: cmd/incus/low_level.go:323 cmd/incus/storage_volume.go:2590
+#: cmd/incus/low_level.go:323 cmd/incus/storage_volume.go:2630
 #, c-format
 msgid   "NBD listening on %v"
 msgstr  ""
@@ -7259,7 +7263,7 @@ msgstr  ""
 msgid   "Source:"
 msgstr  ""
 
-#: cmd/incus/low_level.go:280 cmd/incus/storage_volume.go:2539
+#: cmd/incus/low_level.go:280 cmd/incus/storage_volume.go:2579
 msgid   "Specific address to listen on"
 msgstr  ""
 
@@ -9419,6 +9423,9 @@ msgstr  ""
 #: cmd/incus/storage_volume.go:2397
 msgid   "incus storage volume import default backup0.tar.gz\n"
         "    Create a new custom volume using backup0.tar.gz as the source\n"
+        "\n"
+        "incus storage volume import default https://example.com/backup0.tar.gz myvol\n"
+        "    Create a new custom volume by having the server download backup0.tar.gz directly\n"
         "\n"
         "incus storage volume import default some-installer.iso installer --type=iso\n"
         "    Create a new custom volume storing some-installer.iso for use as a CD-ROM image"
