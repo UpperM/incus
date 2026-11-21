@@ -2387,7 +2387,7 @@ type cmdStorageVolumeImport struct {
 	flagType string
 }
 
-var cmdStorageVolumeImportUsage = u.Usage{u.Pool.Remote(), u.BackupFile, u.NewName(u.Volume).Optional()}
+var cmdStorageVolumeImportUsage = u.Usage{u.Pool.Remote(), u.Either(u.BackupFile, u.URL), u.NewName(u.Volume).Optional()}
 
 func (c *cmdStorageVolumeImport) command() *cobra.Command {
 	cmd := &cobra.Command{}
@@ -2396,6 +2396,9 @@ func (c *cmdStorageVolumeImport) command() *cobra.Command {
 	cmd.Long = cli.FormatSection(color.DescriptionPrefix, i18n.G(`Import custom storage volumes.`))
 	cmd.Example = cli.FormatSection("", i18n.G(`incus storage volume import default backup0.tar.gz
     Create a new custom volume using backup0.tar.gz as the source
+
+incus storage volume import default https://example.com/backup0.tar.gz myvol
+    Create a new custom volume by having the server download backup0.tar.gz directly
 
 incus storage volume import default some-installer.iso installer --type=iso
     Create a new custom volume storing some-installer.iso for use as a CD-ROM image`))
@@ -2429,6 +2432,43 @@ func (c *cmdStorageVolumeImport) run(cmd *cobra.Command, args []string) error {
 	// Use the provided target.
 	if c.storage.flagTarget != "" {
 		d = d.UseTarget(c.storage.flagTarget)
+	}
+
+	lowerBackupFile := strings.ToLower(backupFile)
+	if strings.HasPrefix(lowerBackupFile, "http://") || strings.HasPrefix(lowerBackupFile, "https://") {
+		if c.flagType == "iso" {
+			return errors.New(i18n.G("Importing from a URL is only supported for backup imports"))
+		}
+
+		progress := cli.ProgressRenderer{
+			Format: i18n.G("Importing custom volume: %s"),
+			Quiet:  c.global.flagQuiet,
+		}
+
+		createArgs := incus.StorageVolumeBackupArgs{
+			Name:   volName,
+			Source: &api.BackupSource{URL: backupFile},
+		}
+
+		op, err := d.CreateStoragePoolVolumeFromBackup(poolName, createArgs)
+		if err != nil {
+			return err
+		}
+
+		_, err = op.AddHandler(progress.UpdateOp)
+		if err != nil {
+			progress.Done("")
+			return err
+		}
+
+		err = cli.CancelableWait(op, &progress)
+		if err != nil {
+			progress.Done("")
+			return err
+		}
+
+		progress.Done("")
+		return nil
 	}
 
 	var file *os.File
