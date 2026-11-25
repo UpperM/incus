@@ -3627,3 +3627,28 @@ This adds a new image property, `volume.size_hint`, which sets the size of the c
 ## `network_allocations_project`
 
 Adds the `project` field to the network allocations API response, holding the project of the network.
+
+## `storage_lvm_snapshot_chunk_size`
+
+Adds the `lvm.snapshots.chunk_size` volume configuration key (and its `volume.lvm.snapshots.chunk_size` pool default) to set the copy-on-write chunk size of snapshots on LVM pools that don't use a thin pool.
+
+## `nic_bridged_vlan_ingress`
+
+This adds a new `vlan.ingress` option to `bridged` NICs, to `physical` NICs and to `physical` networks whose parent is a bridge, used for private VLANs where the return traffic for the untagged VLAN comes in on a separate ingress VLAN.
+
+## `network_dns_domain_none`
+
+Adds support for the `none` value on the `dns.domain` and `dns.search` options of `bridge` and `ovn` networks, which stops the domain or search list from being advertised to the instances.
+
+## `events_target`
+
+Adds the `target` query parameter to `GET /1.0/events` to get the event stream of a specific cluster member.
+
+## `network_ovn_parent_shared`
+
+The `parent` of an OVN network can now be a network of the default project shared into the network's project through `restricted.networks.access`.
+## `storage_volume_backup_import`
+
+Adds a `backup` source type to `POST /1.0/storage-pools/{poolName}/volumes/custom`, which has the server download a custom volume backup from an HTTP or HTTPS URL (`source.backup.url`) and import it.
+
+This also adds the `restricted.backups.servers` project option, the list of servers a restricted project may import backups from.

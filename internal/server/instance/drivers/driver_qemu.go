@@ -1494,24 +1494,42 @@ func (d *qemu) restoreStateWait(ctx context.Context, monitor *qmp.Monitor) error
 	return nil
 }
 
-// receiveMigrationSnapshot handles an incoming disk snapshot during migration.
-func (d *qemu) receiveMigrationSnapshot(monitor *qmp.Monitor, blockExport string, filesystemConn io.ReadWriteCloser) error {
+// startMigrationSnapshotExport starts the NBD server an incoming disk snapshot gets written through.
+func (d *qemu) startMigrationSnapshotExport(monitor *qmp.Monitor, blockExport string) (net.Conn, error) {
 	nbdConn, err := monitor.NBDServerStart(d.nbdPath(), 1)
 	if err != nil {
-		return fmt.Errorf("Failed starting NBD server: %w", err)
+		return nil, fmt.Errorf("Failed starting NBD server: %w", err)
 	}
 
 	d.logger.Debug("Migration NBD server started")
+
+	err = monitor.NBDBlockExportAdd(blockExport, blockExport, true, "", nil)
+	if err != nil {
+		_ = nbdConn.Close()
+		_ = monitor.NBDServerStop()
+
+		return nil, fmt.Errorf("Failed adding disk to NBD server: %w", err)
+	}
+
+	return nbdConn, nil
+}
+
+// receiveMigrationSnapshot handles an incoming disk snapshot during migration.
+// The NBD server is started here unless the caller already did.
+func (d *qemu) receiveMigrationSnapshot(monitor *qmp.Monitor, blockExport string, filesystemConn io.ReadWriteCloser, nbdConn net.Conn) error {
+	if nbdConn == nil {
+		var err error
+
+		nbdConn, err = d.startMigrationSnapshotExport(monitor, blockExport)
+		if err != nil {
+			return err
+		}
+	}
 
 	defer func() {
 		_ = nbdConn.Close()
 		_ = monitor.NBDServerStop()
 	}()
-
-	err = monitor.NBDBlockExportAdd(blockExport, blockExport, true, "", nil)
-	if err != nil {
-		return fmt.Errorf("Failed adding root disk to NBD server: %w", err)
-	}
 
 	d.logger.Debug("Migration storage NBD export starting")
 
@@ -1536,18 +1554,28 @@ func (d *qemu) restoreState(monitor *qmp.Monitor) error {
 		// Perform non-shared storage transfer if requested.
 		filesystemConn := d.migrationReceiveStateful[api.SecretNameFilesystem]
 		if filesystemConn != nil {
+			var rootDiskName string
+			var rootNBDConn net.Conn
+
+			if d.migrationRootDisk {
+				rootDevName, _, err := internalInstance.GetRootDiskDevice(d.expandedDevices.CloneNative())
+				if err != nil {
+					return fmt.Errorf("Failed getting instance root disk: %w", err)
+				}
+
+				rootDiskName = d.blockNodeName(linux.PathNameEncode(rootDevName))
+
+				// Exporting a freshly received disk can hold the monitor for a while on slow storage,
+				// so have it done before the state transfer commands are sent.
+				rootNBDConn, err = d.startMigrationSnapshotExport(monitor, rootDiskName)
+				if err != nil {
+					return err
+				}
+			}
+
 			go func() {
 				if d.migrationRootDisk {
-					rootDiskName, _, err := internalInstance.GetRootDiskDevice(d.expandedDevices.CloneNative())
-					if err != nil {
-						d.logger.Error("Failed getting instance root disk", logger.Ctx{"err": err})
-						return
-					}
-
-					escapedDeviceName := linux.PathNameEncode(rootDiskName)
-					rootDiskName = d.blockNodeName(escapedDeviceName)
-
-					err = d.receiveMigrationSnapshot(monitor, rootDiskName, filesystemConn)
+					err := d.receiveMigrationSnapshot(monitor, rootDiskName, filesystemConn, rootNBDConn)
 					if err != nil {
 						d.logger.Error("Failed receiving migration snapshot", logger.Ctx{"err": err})
 						return
@@ -1578,7 +1606,7 @@ func (d *qemu) restoreState(monitor *qmp.Monitor) error {
 
 					diskName := d.blockNodeName(linux.PathNameEncode(deviceName))
 
-					err = d.receiveMigrationSnapshot(monitor, diskName, filesystemConn)
+					err = d.receiveMigrationSnapshot(monitor, diskName, filesystemConn, nil)
 					if err != nil {
 						d.logger.Error("Failed receiving migration snapshot", logger.Ctx{"err": err})
 					}
@@ -9824,6 +9852,10 @@ func (d *qemu) MigrateSend(args instance.MigrateSendArgs) error {
 		channels := qemuMigrationChannels()
 		offerHeader.MultifdChannels = &channels
 
+		// QEMU only accepts parallel channels from a VM with its own UUID.
+		instUUID := d.localConfig["volatile.uuid"]
+		offerHeader.Uuid = &instUUID
+
 		// Offer to carry the persistent bitmaps in the state transfer.
 		offerHeader.DirtyBitmaps = new(true)
 	}
@@ -9877,8 +9909,10 @@ func (d *qemu) MigrateSend(args instance.MigrateSendArgs) error {
 			op.Done(err)
 			return err
 		}
+	}
 
-		// The target can only activate the volumes once they're shared.
+	// The target can only activate the volumes once they're shared, dependent disks stay in place even when the root moves.
+	if args.Live && clusterMove {
 		d.stopStorageLock()
 
 		err = pool.SetInstanceAccessMode(d, storageDrivers.VolumeAccessModeShared, d.op)
@@ -10131,16 +10165,35 @@ func (d *qemu) MigrateSend(args instance.MigrateSendArgs) error {
 	}
 }
 
+// ephemeralSnapshotDir returns the host-local directory temporary snapshots are created in.
+// They hold guest writes, so can't live on the instance volume with its small quota and read-only periods.
+func (d *qemu) ephemeralSnapshotDir() (string, error) {
+	snapshotDir := d.localImageMetadataDir()
+
+	err := os.MkdirAll(snapshotDir, 0o700)
+	if err != nil {
+		return "", fmt.Errorf("Failed creating temporary snapshot directory: %w", err)
+	}
+
+	// Label the directory for the confined QEMU process, the snapshots inherit it.
+	err = d.selinuxLabelPath(snapshotDir)
+	if err != nil {
+		return "", err
+	}
+
+	return snapshotDir, nil
+}
+
 // prepareEphemeralSnapshot sets up an overlay block device suitable for short lived operations.
 // When backed is true, the overlay is opened with the disk's current top node as its backing
 // node, as needed by copy-before-write overlays.
-func (d *qemu) prepareEphemeralSnapshot(monitor *qmp.Monitor, diskName string, diskSize int64, backed bool) (string, string, func(), error) {
+func (d *qemu) prepareEphemeralSnapshot(monitor *qmp.Monitor, diskName string, diskSize int64, backed bool, snapshotDir string) (string, string, func(), error) {
 	snapshotDiskName := ephemeralSnapshotName(diskName)
 
 	// Create snapshot of the disk.
-	// We use the VM's config volume for this so that the maximum size of the snapshot can be limited
-	// by setting the root disk's `size.state` property.
-	snapshotFile := filepath.Join(d.Path(), fmt.Sprintf("%s.qcow2", snapshotDiskName))
+	// The VM's config volume is normally used for this so that the maximum size of the snapshot can be
+	// limited by setting the root disk's `size.state` property.
+	snapshotFile := filepath.Join(snapshotDir, fmt.Sprintf("%s.qcow2", snapshotDiskName))
 
 	// Find the disk's current top node, the base of the new overlay.
 	blockDevs, err := d.fetchBlockDeviceChain(monitor, diskName)
@@ -10315,13 +10368,13 @@ func (d *qemu) removeEphemeralOverlay(monitor *qmp.Monitor, overlayNode string) 
 }
 
 // createEphemeralSnapshot creates a temporary snapshot of the disk that is intended for short-lived operations.
-func (d *qemu) createEphemeralSnapshot(diskName string, diskSize int64) (func(), error) {
+func (d *qemu) createEphemeralSnapshot(diskName string, diskSize int64, snapshotDir string) (func(), error) {
 	monitor, err := d.qmpConnect()
 	if err != nil {
 		return nil, err
 	}
 
-	snapshotDiskName, blockDevName, removeOverlay, err := d.prepareEphemeralSnapshot(monitor, diskName, diskSize, false)
+	snapshotDiskName, blockDevName, removeOverlay, err := d.prepareEphemeralSnapshot(monitor, diskName, diskSize, false, snapshotDir)
 	if err != nil {
 		return nil, err
 	}
@@ -10341,8 +10394,9 @@ func (d *qemu) createEphemeralSnapshot(diskName string, diskSize int64) (func(),
 }
 
 // sendMigrationSnapshot transfers the snapshot to the target.
-// If finalize is true, it performs cleanup after migration.
+// If finalize is true, it completes the transfer before returning.
 // Otherwise, it returns a finalize function that can be called later.
+// The snapshot itself is left attached, the caller merges it back with mergeEphemeralSnapshot.
 func (d *qemu) sendMigrationSnapshot(ctx context.Context, diskName string, filesystemConn io.ReadWriteCloser, finalize bool) (func() error, error) {
 	monitor, err := d.qmpConnect()
 	if err != nil {
@@ -10525,21 +10579,17 @@ func (d *qemu) sendMigrationSnapshot(ctx context.Context, diskName string, files
 	d.logger.Debug("Migration storage snapshot transfer finished")
 
 	finalizeFunc := func() error {
-		filesystemConn.Close()
-		_ = g.Wait()
-
 		// Complete the migration snapshot sync process (the guest OS will remain paused).
+		// Keep the NBD connection up until the mirror job is gone, or its last I/O and flush fail.
 		d.logger.Debug("Migration storage snapshot transfer commit started")
-		err = monitor.BlockJobCancel(snapshotDiskName)
+		err = monitor.BlockJobCancelWait(snapshotDiskName)
 		if err != nil {
 			return fmt.Errorf("Failed cancelling block job: %w", err)
 		}
 
 		d.logger.Debug("Migration storage snapshot transfer commit finished")
 
-		time.Sleep(time.Second) // Wait for it to be released.
-
-		// Remove the NBD client disk.
+		// Remove the NBD client disk, which flushes it and closes QEMU's NBD connection.
 		err = monitor.RemoveBlockDevice(targetDiskName)
 		if err != nil {
 			d.logger.Warn("Failed removing NBD storage target device", logger.Ctx{"err": err})
@@ -10547,17 +10597,11 @@ func (d *qemu) sendMigrationSnapshot(ctx context.Context, diskName string, files
 
 		d.logger.Debug("Removed NBD storage target device")
 
-		// Merge snapshot back to the source disk so we don't lose the writes.
-		err = monitor.BlockCommit(snapshotDiskName, "", "")
-		if err != nil {
-			return fmt.Errorf("Failed merging migration storage snapshot: %w", err)
-		}
+		// Only now end the transfer, which lets the target stop its NBD server.
+		filesystemConn.Close()
+		_ = g.Wait()
 
-		err = monitor.RemoveBlockDevice(snapshotDiskName)
-		if err != nil {
-			return fmt.Errorf("Failed removing temporary snapshot disk device: %w", err)
-		}
-
+		// The caller merges the snapshot back once the guest runs again, to keep the pause short.
 		return nil
 	}
 
@@ -10615,6 +10659,9 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 
 	rootTransferDone := false
 
+	// Ephemeral snapshots taken for the storage transfer, merged back once the guest runs again.
+	var snapshotOverlays []string
+
 	parameters := map[string]any{
 		"cpu-throttle-initial":       50,
 		"throttle-trigger-threshold": 20,
@@ -10638,6 +10685,18 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 
 		parameters["max-bandwidth"] = bwlimitBytes
 	}
+
+	// Keep the final pause short. QEMU's default of 300ms is a lot of lost
+	// traffic, and routed NICs are used where every bit of it counts.
+	downtimeLimit := 100
+	for _, dev := range d.expandedDevices {
+		if dev["type"] == "nic" && dev["nictype"] == "routed" {
+			downtimeLimit = 50
+			break
+		}
+	}
+
+	parameters["downtime-limit"] = downtimeLimit
 
 	// Non-shared storage snapshot setup.
 	if !sameSharedStorage || dependentVolumeMove {
@@ -10690,18 +10749,20 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 			}
 		})
 
+		snapshotDir, err := d.ephemeralSnapshotDir()
+		if err != nil {
+			return err
+		}
+
 		if !sameSharedStorage {
-			cleanup, err := d.createEphemeralSnapshot(rootDiskName, rootDiskSize)
+			cleanup, err := d.createEphemeralSnapshot(rootDiskName, rootDiskSize, snapshotDir)
 			if err != nil {
 				return fmt.Errorf("Failed creating migration snapshot: %w", err)
 			}
 
-			// The snapshot is gone once its transfer has been finalized.
-			reverter.Add(func() {
-				if !rootTransferDone {
-					cleanup()
-				}
-			})
+			// The snapshot is only merged back after the hand-over, so merge it on any failure.
+			reverter.Add(cleanup)
+			snapshotOverlays = append(snapshotOverlays, ephemeralSnapshotName(rootDiskName))
 		}
 
 		for _, vol := range volSourceArgs.DependentVolumes {
@@ -10709,12 +10770,13 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 
 			d.logger.Debug("Create snapshot for dependent volume", logger.Ctx{"name": vol.Name, "size": vol.VolumeSize, "diskName": diskName})
 
-			cleanup, err := d.createEphemeralSnapshot(diskName, vol.VolumeSize)
+			cleanup, err := d.createEphemeralSnapshot(diskName, vol.VolumeSize, snapshotDir)
 			if err != nil {
 				return fmt.Errorf("Failed creating migration snapshot: %w", err)
 			}
 
 			reverter.Add(cleanup)
+			snapshotOverlays = append(snapshotOverlays, ephemeralSnapshotName(diskName))
 		}
 
 		d.logger.Debug("Setup temporary migration storage snapshot")
@@ -10772,11 +10834,11 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 		return err
 	}
 
-	// Notify the shared disks that they're going to be accessed from another system,
+	// Notify the dependent block disks that they're going to be accessed from another system,
 	// but only when performing a move within the same storage pool.
 	if storagePool == "" && clusterMoveSourceName != "" {
 		for _, dev := range d.expandedDevices.Sorted() {
-			if dev.Config["type"] != "disk" || dev.Config["path"] == "/" || dev.Config["pool"] == "" {
+			if dev.Config["type"] != "disk" || dev.Config["path"] == "/" || dev.Config["pool"] == "" || util.IsFalseOrEmpty(dev.Config["dependent"]) {
 				continue
 			}
 
@@ -10800,6 +10862,11 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 			dbVol, err := storagePools.VolumeDBGet(diskPool, storageProjectName, volName, storageDrivers.VolumeTypeCustom)
 			if err != nil {
 				return fmt.Errorf("Failed loading custom volume for device %q: %w", dev.Name, err)
+			}
+
+			// Only block disks are held open by QEMU.
+			if dbVol.ContentType != string(storageDrivers.ContentTypeBlock) {
+				continue
 			}
 
 			vol := diskPool.GetVolume(storageDrivers.VolumeTypeCustom, storageDrivers.ContentType(dbVol.ContentType), project.StorageVolume(storageProjectName, volName), dbVol.Config)
@@ -10932,6 +10999,18 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 				return fmt.Errorf("Failed transferring snapshot disk: %w", err)
 			}
 		}
+
+		// A cluster move stops the source at the hand-over, so merge the snapshots back now to keep its disk whole.
+		if clusterMoveSourceName != "" {
+			for _, overlay := range snapshotOverlays {
+				err = d.mergeEphemeralSnapshot(monitor, overlay)
+				if err != nil {
+					return fmt.Errorf("Failed merging migration storage snapshot: %w", err)
+				}
+			}
+
+			snapshotOverlays = nil
+		}
 	}
 
 	// With the guest paused, flush any pending config volume writes (TPM state, UEFI
@@ -11000,6 +11079,14 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 
 		d.resyncAgentClock()
 		d.logger.Debug("Resumed instance")
+
+		// Merge the snapshots back only now, as QEMU gives the disks back to the source on resume.
+		for _, overlay := range snapshotOverlays {
+			err = d.mergeEphemeralSnapshot(monitor, overlay)
+			if err != nil {
+				d.logger.Warn("Failed merging migration snapshot after hand-over", logger.Ctx{"overlay": overlay, "err": err})
+			}
+		}
 
 		err = monitor.SetAction(map[string]string{"shutdown": "poweroff"})
 		if err != nil {
@@ -11169,7 +11256,9 @@ func (d *qemu) MigrateReceive(args instance.MigrateReceiveArgs) error {
 		useStateConn = true
 
 		// Use parallel channels when offered and we're the one opening the connections.
-		if args.StateConnExtra != nil && offerHeader.GetMultifdChannels() > 0 {
+		// A copy gets a new UUID, which QEMU refuses on those channels.
+		sameUUID := offerHeader.GetUuid() == "" || offerHeader.GetUuid() == d.localConfig["volatile.uuid"]
+		if args.StateConnExtra != nil && offerHeader.GetMultifdChannels() > 0 && sameUUID {
 			channels = min(offerHeader.GetMultifdChannels(), qemuMigrationChannels())
 			respHeader.MultifdChannels = &channels
 		}
@@ -11435,12 +11524,19 @@ func (d *qemu) MigrateReceive(args instance.MigrateReceiveArgs) error {
 			return err
 		}
 
-		// Notify the shared disks that they're going to be accessed from another system,
-		// but only when performing a move within the same storage pool.
-		if !storageMove && args.ClusterMoveSourceName != "" {
+		// Notify the dependent block disks that they're going to be accessed from another system.
+		if args.ClusterMoveSourceName != "" {
 			for _, dev := range d.expandedDevices.Sorted() {
-				if dev.Config["type"] != "disk" || dev.Config["path"] == "/" || dev.Config["pool"] == "" {
+				if dev.Config["type"] != "disk" || dev.Config["path"] == "/" || dev.Config["pool"] == "" || util.IsFalseOrEmpty(dev.Config["dependent"]) {
 					continue
+				}
+
+				// When the root moves pool, only the live disks staying in place need preparing.
+				if storageMove {
+					migrated := slices.ContainsFunc(dependentVolumes, func(v localMigration.DependentVolumeArgs) bool { return v.DeviceName == dev.Name })
+					if !args.Live || migrated {
+						continue
+					}
 				}
 
 				// Load the pool for the disk.
@@ -11454,17 +11550,21 @@ func (d *qemu) MigrateReceive(args instance.MigrateReceiveArgs) error {
 					continue
 				}
 
-				// Setup the volume entry.
-				extraTargetArgs := localMigration.VolumeTargetArgs{
-					Live:                  args.Live,
-					ClusterMoveSourceName: args.ClusterMoveSourceName,
-					StoragePool:           args.StoragePool,
-				}
-
 				volName, _ := internalInstance.SplitVolumeSource(dev.Config["source"])
 				dbVol, err := storagePools.VolumeDBGet(diskPool, storageProjectName, volName, storageDrivers.VolumeTypeCustom)
 				if err != nil {
 					return fmt.Errorf("Failed loading custom volume for device %q: %w", dev.Name, err)
+				}
+
+				// Only block disks are held open by QEMU.
+				if dbVol.ContentType != string(storageDrivers.ContentTypeBlock) {
+					continue
+				}
+
+				// Setup the volume entry.
+				extraTargetArgs := localMigration.VolumeTargetArgs{
+					Live:                  args.Live,
+					ClusterMoveSourceName: args.ClusterMoveSourceName,
 				}
 
 				vol := diskPool.GetVolume(storageDrivers.VolumeTypeCustom, storageDrivers.ContentType(dbVol.ContentType), project.StorageVolume(storageProjectName, volName), dbVol.Config)
@@ -11587,7 +11687,7 @@ func (d *qemu) MigrateReceive(args instance.MigrateReceiveArgs) error {
 
 		reverter.Success()
 
-		if args.Live && clusterMove && !storageMove && pool.Driver().Info().Remote {
+		if args.Live && clusterMove {
 			d.lockStorageExclusive(d, pool)
 		}
 
@@ -14479,7 +14579,12 @@ func (d *qemu) ConnectNBD(diskName string, volSize int64, writable bool) (net.Co
 	if !writable {
 		// Expose a frozen view of the disk through a copy-before-write overlay
 		// (see ConnectNBDAllDisks).
-		snapNode, baseNode, removeOverlay, err := d.prepareEphemeralSnapshot(monitor, blockExport, volSize, true)
+		snapshotDir, err := d.ephemeralSnapshotDir()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		snapNode, baseNode, removeOverlay, err := d.prepareEphemeralSnapshot(monitor, blockExport, volSize, true, snapshotDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("Failed creating temporary snapshot: %w", err)
 		}
@@ -14699,7 +14804,12 @@ func (d *qemu) ConnectNBDAllDisks(reuse bool) (net.Conn, func(), error) {
 			bitmapNames = append(bitmapNames, b.Name)
 		}
 
-		overlayNode, baseNode, removeOverlay, err := d.prepareEphemeralSnapshot(monitor, nodeName, 0, true)
+		snapshotDir, err := d.ephemeralSnapshotDir()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		overlayNode, baseNode, removeOverlay, err := d.prepareEphemeralSnapshot(monitor, nodeName, 0, true, snapshotDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("Failed creating temporary snapshot for %q: %w", devName, err)
 		}

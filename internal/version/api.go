@@ -602,6 +602,12 @@ var APIExtensions = []string{
 	"pci_rebar",
 	"image_volume_size_hint",
 	"network_allocations_project",
+	"storage_lvm_snapshot_chunk_size",
+	"nic_bridged_vlan_ingress",
+	"network_dns_domain_none",
+	"events_target",
+	"network_ovn_parent_shared",
+	"storage_volume_backup_import",
 }
 
 // APIExtensionsCount returns the number of available API extensions.

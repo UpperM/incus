@@ -18,7 +18,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
@@ -973,14 +972,6 @@ func (d *zfs) CreateVolumeFromCopy(vol Volume, srcVol Volume, copySnapshots bool
 				return err
 			}
 		}
-
-		// Mount the volume and ensure the permissions are set correctly inside the mounted volume.
-		err := vol.MountTask(func(_ string, _ *operations.Operation) error {
-			return vol.EnsureMountPath(false)
-		}, op)
-		if err != nil {
-			return err
-		}
 	}
 
 	// Pass allowUnsafeResize as true when resizing block backed filesystem volumes because we want to allow
@@ -994,9 +985,21 @@ func (d *zfs) CreateVolumeFromCopy(vol Volume, srcVol Volume, copySnapshots bool
 
 	// Resize volume to the size specified. Only uses volume "size" property and does not use pool/defaults
 	// to give the caller more control over the size being used.
+	// This happens before the first mount so the zvol isn't hidden and re-exposed right before its volsize
+	// changes, that sequence races the asynchronous minor removal in ZFS 2.4 and crashes the kernel.
 	err = d.SetVolumeQuota(vol, vol.config["size"], allowUnsafeResize, op)
 	if err != nil {
 		return err
+	}
+
+	if vol.contentType == ContentTypeFS {
+		// Mount the volume and ensure the permissions are set correctly inside the mounted volume.
+		err := vol.MountTask(func(_ string, _ *operations.Operation) error {
+			return vol.EnsureMountPath(false)
+		}, op)
+		if err != nil {
+			return err
+		}
 	}
 
 	// All done.
@@ -1706,6 +1709,14 @@ func (d *zfs) deleteVolume(vol Volume, op *operations.Operation) error {
 			return err
 		}
 
+		// Detach any loop device left on the zvol as it would otherwise prevent deletion.
+		if IsContentBlock(vol.contentType) || d.isBlockBacked(vol) {
+			err = d.detachLoopDevices(d.dataset(vol, false))
+			if err != nil {
+				return err
+			}
+		}
+
 		// Handle clones.
 		clones, err := d.getClones(d.dataset(vol, false))
 		if err != nil {
@@ -2064,6 +2075,10 @@ func (d *zfs) GetVolumeUsage(vol Volume) (int64, error) {
 // SetVolumeQuota sets the quota/reservation on the volume.
 // Does nothing if supplied with an empty/zero size for block volumes.
 func (d *zfs) SetVolumeQuota(vol Volume, size string, allowUnsafeResize bool, op *operations.Operation) error {
+	dataset := d.dataset(vol, false)
+	quotaKey, otherQuotaKey := "quota", "refquota"
+	reservationKey, otherReservationKey := "reservation", "refreservation"
+
 	// Convert to bytes.
 	sizeBytes, err := units.ParseByteSizeString(size)
 	if err != nil {
@@ -2084,7 +2099,7 @@ func (d *zfs) SetVolumeQuota(vol Volume, size string, allowUnsafeResize bool, op
 			return err
 		}
 
-		oldSizeBytesStr, err := d.getDatasetProperty(d.dataset(vol, false), "volsize")
+		oldSizeBytesStr, err := d.getDatasetProperty(dataset, "volsize")
 		if err != nil {
 			return err
 		}
@@ -2143,13 +2158,13 @@ func (d *zfs) SetVolumeQuota(vol Volume, size string, allowUnsafeResize bool, op
 				l.Debug("ZFS volume filesystem shrunk")
 
 				// Shrink the block device.
-				err = d.setDatasetProperties(d.dataset(vol, false), fmt.Sprintf("volsize=%d", sizeBytes))
+				err = d.setDatasetProperties(dataset, fmt.Sprintf("volsize=%d", sizeBytes))
 				if err != nil {
 					return err
 				}
 			} else if sizeBytes > oldVolSizeBytes {
 				// Grow block device first.
-				err = d.setDatasetProperties(d.dataset(vol, false), fmt.Sprintf("volsize=%d", sizeBytes))
+				err = d.setDatasetProperties(dataset, fmt.Sprintf("volsize=%d", sizeBytes))
 				if err != nil {
 					return err
 				}
@@ -2178,7 +2193,7 @@ func (d *zfs) SetVolumeQuota(vol Volume, size string, allowUnsafeResize bool, op
 				}
 			}
 
-			err = d.setDatasetProperties(d.dataset(vol, false), fmt.Sprintf("volsize=%d", sizeBytes))
+			err = d.setDatasetProperties(dataset, fmt.Sprintf("volsize=%d", sizeBytes))
 			if err != nil {
 				return err
 			}
@@ -2203,39 +2218,79 @@ func (d *zfs) SetVolumeQuota(vol Volume, size string, allowUnsafeResize bool, op
 		return nil
 	}
 
-	// Clear the existing quota.
-	for _, property := range []string{"quota", "refquota", "reservation", "refreservation"} {
-		err = d.setDatasetProperties(d.dataset(vol, false), fmt.Sprintf("%s=none", property))
-		if err != nil {
-			return err
-		}
-	}
-
-	value := fmt.Sprintf("%d", sizeBytes)
-	if sizeBytes == 0 {
-		return nil
-	}
-
-	// Apply the new quota.
-	quotaKey := "quota"
-	reservationKey := "reservation"
-	if util.IsTrue(vol.ExpandedConfig("zfs.use_refquota")) {
-		quotaKey = "refquota"
-		reservationKey = "refreservation"
-	}
-
-	err = d.setDatasetProperties(d.dataset(vol, false), fmt.Sprintf("%s=%s", quotaKey, value))
+	// Save initial quotas
+	oldProperties, err := d.getDatasetProperties(dataset, quotaKey, otherQuotaKey, reservationKey, otherReservationKey)
 	if err != nil {
 		return err
 	}
 
-	if util.IsTrue(vol.ExpandedConfig("zfs.reserve_space")) {
-		err = d.setDatasetProperties(d.dataset(vol, false), fmt.Sprintf("%s=%s", reservationKey, value))
+	// Only the active limits are set, the others are cleared.
+	if util.IsTrue(vol.ExpandedConfig("zfs.use_refquota")) {
+		quotaKey, otherQuotaKey = otherQuotaKey, quotaKey
+		reservationKey, otherReservationKey = otherReservationKey, reservationKey
+	}
+
+	oldLimits := make(map[string]int64, len(oldProperties))
+	for key, value := range oldProperties {
+		oldLimits[key], err = strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return err
 		}
 	}
 
+	newLimits := map[string]int64{}
+	if sizeBytes > 0 {
+		newLimits[quotaKey] = sizeBytes
+		if util.IsTrue(vol.ExpandedConfig("zfs.reserve_space")) {
+			newLimits[reservationKey] = sizeBytes
+		}
+	}
+
+	// A quota below reservation and a reservation exceeding quota are refused by ZFS
+	order := []string{quotaKey, otherQuotaKey}
+	for _, key := range []string{reservationKey, otherReservationKey} {
+		if newLimits[key] < oldLimits[key] {
+			order = slices.Insert(order, 0, key)
+		} else {
+			order = append(order, key)
+		}
+	}
+
+	setLimit := func(key string, limitSize int64) error {
+		value := "none" // ZFS only accepts none.
+		if limitSize > 0 {
+			value = fmt.Sprintf("%d", limitSize)
+		}
+
+		return d.setDatasetProperties(dataset, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	// Initialize a revert to revert to previous quota in case of failure
+	reverter := revert.New()
+	defer reverter.Fail()
+
+	revertFailed := false
+
+	for _, key := range order {
+		if newLimits[key] == oldLimits[key] {
+			continue
+		}
+
+		err = setLimit(key, newLimits[key])
+		if err != nil {
+			return err
+		}
+
+		reverter.Add(func() {
+			if revertFailed {
+				return
+			}
+
+			revertFailed = setLimit(key, oldLimits[key]) != nil
+		})
+	}
+
+	reverter.Success()
 	return nil
 }
 
@@ -2315,31 +2370,13 @@ func (d *zfs) getVolumeDiskPathFromDataset(dataset string) (string, error) {
 		return -1
 	})
 
-	zfsDataset := func(devPath string) string {
-		// Open the device.
-		r, err := os.OpenFile(devPath, unix.O_RDONLY|unix.O_CLOEXEC, 0)
-		if err != nil {
-			return ""
-		}
-
-		defer logger.WarnOnError(r.Close, "Failed to close file")
-
-		// Perform the BLKZNAME ioctl.
-		buf := [256]byte{}
-		_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(r.Fd()), linux.IoctlBlkZname, uintptr(unsafe.Pointer(&buf)))
-		if errno != 0 {
-			return ""
-		}
-
-		return string(bytes.Trim(buf[:], "\x00"))
-	}
-
 	// Check each entry for a dataset match.
 	for _, entry := range zfsEntries {
 		// Check if it's our dataset.
 		zfsDev := "/dev/" + entry.Name()
 
-		if zfsDataset(zfsDev) == dataset {
+		zvolDataset, _ := zfsDatasetFromDevice(zfsDev)
+		if zvolDataset == dataset {
 			return zfsDev, nil
 		}
 	}

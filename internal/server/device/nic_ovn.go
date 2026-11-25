@@ -745,6 +745,14 @@ func (d *nicOVN) checkAddressConflict() error {
 			return nil
 		}
 
+		// Our own instance may be mid-update, so check its pending devices rather than the database record.
+		if sameLogicalInstance {
+			nicConfig = d.inst.ExpandedDevices()[nicName]
+			if !network.DeviceUsesNetwork(d.network.Name(), d.network.Type(), nicConfig) {
+				return nil
+			}
+		}
+
 		// Check there isn't another instance with the same DNS name connected to managed network.
 		sameLogicalInstanceNestedNIC := sameLogicalInstance && (d.config["nested"] != "" || nicConfig["nested"] != "")
 		if d.network != nil && !sameLogicalInstanceNestedNIC && nicCheckDNSNameConflict(d.inst.Name(), inst.Name) {
@@ -1053,7 +1061,7 @@ func (d *nicOVN) Start() (*deviceConfig.RunConfig, error) {
 				}
 
 				integrationBridgeNICName = saveData["host_name"]
-				peerName, mtu, err = networkCreateVethPair(saveData["host_name"], d.config)
+				peerName, mtu, err = networkCreateVethPair(saveData["host_name"], nil, d.config)
 				if err != nil {
 					return nil, err
 				}
@@ -1065,7 +1073,7 @@ func (d *nicOVN) Start() (*deviceConfig.RunConfig, error) {
 
 				integrationBridgeNICName = saveData["host_name"]
 				peerName = saveData["host_name"] // VMs use the host_name to link to the TAP FD.
-				mtu, err = networkCreateTap(saveData["host_name"], d.config)
+				mtu, err = networkCreateTap(saveData["host_name"], nil, d.config)
 				if err != nil {
 					return nil, err
 				}

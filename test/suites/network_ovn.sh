@@ -475,6 +475,14 @@ test_network_ovn_basic() {
     # Look for DHCP options mentioning our testdhcp domain name, there should be two.
     ovn-nbctl --format=csv --no-headings --data=bare --colum=_uuid,options find dhcp_options | grep -cF testdhcp | grep -xF 2
 
+    # Check "none" stops the domain and the search list from being advertised (other networks keep theirs).
+    ovnNetID=$(incus admin sql global "SELECT id FROM networks WHERE name='ovn-virtual-network' AND project_id=(SELECT id FROM projects WHERE name='testovn')" | grep -Po '\d+')
+    incus network set ovn-virtual-network dns.domain=none --project testovn
+    ovn-nbctl --format=csv --no-headings --data=bare --colum=_uuid,options find dhcp_options "external_ids:incus_switch=incus-net${ovnNetID}-ls-int" | grep -cF domain | grep -xF 0
+    incus network set ovn-virtual-network dns.domain=testdhcp dns.search=none --project testovn
+    ovn-nbctl --format=csv --no-headings --data=bare --colum=_uuid,options find dhcp_options "external_ids:incus_switch=incus-net${ovnNetID}-ls-int" | grep -cF domain_search | grep -xF 0
+    incus network unset ovn-virtual-network dns.search --project testovn
+
     # Only enable IPv6 DHCP.
     incus init "${instanceImage}" u1 --project testovn -s "${poolName}"
     incus network set ovn-virtual-network ipv4.dhcp=false ipv6.dhcp=true --project testovn
@@ -764,6 +772,16 @@ test_network_ovn_basic() {
     ovn-nbctl --bare --format=csv --column=options find logical_switch_port | grep -cF arp_proxy | grep -xF 0
 
     incus network delete ovn-virtual-child
+
+    # A network shared into a restricted project can be the parent of that project's own networks.
+    incus project create ovn-shared -c features.networks=true -c restricted=true -c restricted.networks.access=ovn-virtual-network
+    incus network create ovn-shared-child --project ovn-shared --type=ovn parent=ovn-virtual-network ipv4.address=10.10.203.1/24 ipv4.nat=true ipv6.address=none
+    incus network show ovn-virtual-network | grep -F "/1.0/networks/ovn-shared-child?project=ovn-shared"
+    ! incus network create ovn-shared-child2 --project ovn-shared --type=ovn parent=ovn-virtual-network ipv4.address=10.10.203.1/24 ipv6.address=none || false # Overlaps the sibling.
+    ! incus project unset ovn-shared restricted.networks.access || false # The parent must stay shared.
+    ! incus project set ovn-shared restricted=false || false
+    incus network delete ovn-shared-child --project ovn-shared
+    incus project delete ovn-shared
 
     # Remove external SNAT address and check normal SNAT operation returns connectivity.
     incus network unset ovn-virtual-network ipv4.nat.address

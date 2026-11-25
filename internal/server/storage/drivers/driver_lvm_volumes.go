@@ -211,12 +211,17 @@ func (d *lvm) CreateVolumeFromMigration(vol Volume, conn io.ReadWriteCloser, vol
 			return err
 		}
 
+		reverter := revert.New()
+		defer reverter.Fail()
+
 		// The source keeps using the volume until the live migration completes.
 		if volTargetArgs.Live && d.exclusiveVolume(vol) {
 			err := d.activateVolumeShared(vol)
 			if err != nil {
 				return err
 			}
+
+			reverter.Add(func() { _, _ = d.deactivateVolume(vol) })
 		}
 
 		if vol.IsVMBlock() {
@@ -227,6 +232,7 @@ func (d *lvm) CreateVolumeFromMigration(vol Volume, conn io.ReadWriteCloser, vol
 			}
 		}
 
+		reverter.Success()
 		return nil
 	}
 
@@ -409,9 +415,9 @@ func (d *lvm) HasVolume(vol Volume) (bool, error) {
 func (d *lvm) FillVolumeConfig(vol Volume) error {
 	// Copy volume.* configuration options from pool.
 	// Exclude "block.filesystem", "block.mount_options", and "block.create_options" as they depend on volume type (handled below).
-	// Exclude "lvm.stripes", "lvm.stripes.size" as they only work on non-thin storage pools (handled below).
+	// Exclude "lvm.stripes", "lvm.stripes.size" and "lvm.snapshots.chunk_size" as they only work on non-thin storage pools (handled below).
 	// Exclude "block.type" as it only applies to block volumes (handled below).
-	err := d.fillVolumeConfig(&vol, "block.filesystem", "block.mount_options", "block.create_options", "lvm.stripes", "lvm.stripes.size", "block.type")
+	err := d.fillVolumeConfig(&vol, "block.filesystem", "block.mount_options", "block.create_options", "lvm.stripes", "lvm.stripes.size", "lvm.snapshots.chunk_size", "block.type")
 	if err != nil {
 		return err
 	}
@@ -473,6 +479,10 @@ func (d *lvm) FillVolumeConfig(vol Volume) error {
 		if vol.config["lvm.stripes.size"] == "" && d.config["volume.lvm.stripes.size"] != "" {
 			vol.config["lvm.stripes.size"] = d.config["volume.lvm.stripes.size"]
 		}
+
+		if vol.config["lvm.snapshots.chunk_size"] == "" && d.config["volume.lvm.snapshots.chunk_size"] != "" {
+			vol.config["lvm.snapshots.chunk_size"] = d.config["volume.lvm.snapshots.chunk_size"]
+		}
 	}
 
 	return nil
@@ -512,7 +522,7 @@ func (d *lvm) commonVolumeRules() map[string]func(value string) error {
 		//
 		// ---
 		//  type: string
-		//  condition: -
+		//  condition: pool not using a thin pool (`lvm.use_thinpool=false` or `lvmcluster` driver)
 		//  default: same as `volume.lvm.stripes`
 		//  shortdesc: Number of stripes to use for new volumes (or thin pool volume)
 		"lvm.stripes": validate.Optional(validate.IsUint32),
@@ -521,27 +531,38 @@ func (d *lvm) commonVolumeRules() map[string]func(value string) error {
 		//
 		// ---
 		//  type: string
-		//  condition: -
+		//  condition: pool not using a thin pool (`lvm.use_thinpool=false` or `lvmcluster` driver)
 		//  default: same as `volume.lvm.stripes.size`
 		//  shortdesc: Size of stripes to use (at least 4096 bytes and multiple of 512 bytes)
 		"lvm.stripes.size": validate.Optional(validate.IsSize),
+
+		// gendoc:generate(entity=storage_volume_lvm, group=common, key=lvm.snapshots.chunk_size)
+		//
+		// ---
+		//  type: string
+		//  condition: pool without a thin pool
+		//  default: same as `volume.lvm.snapshots.chunk_size` or LVM's default (4KiB)
+		//  shortdesc: Copy-on-write chunk size of new snapshots (power of two between 4KiB and 512KiB)
+		"lvm.snapshots.chunk_size": validate.Optional(validateLVMSnapshotChunkSize),
 	}
 
 	if d.clustered {
-		// gendoc:generate(entity=storage_lvm, group=common, key=block.type)
-		//
+		// gendoc:generate(entity=storage_volume_lvm, group=common, key=block.type)
+		// Possible values are `qcow2` and `raw`.
+		// The type cannot be changed after the volume is created.
 		// ---
-		//  type:string
-		//  condition: block-based volume
-		//  default: same as `volume.block.type`
+		//  type: string
+		//  condition: `lvmcluster` driver, VM or custom volume with content type `block`
+		//  default: same as `volume.block.type` or `qcow2`
 		//  shortdesc: Type of the block volume
 		rules["block.type"] = validate.Optional(validate.IsOneOf(BlockVolumeTypeRaw, BlockVolumeTypeQcow2))
 
 		// gendoc:generate(entity=storage_volume_lvm, group=common, key=lvmcluster.remove_snapshots)
-		//
+		// Only the most recent snapshot of a `qcow2` volume can be restored.
+		// When this option is enabled, restoring an older snapshot deletes all the snapshots taken after it.
 		// ---
 		//  type: bool
-		//  condition: -
+		//  condition: `lvmcluster` driver
 		//  default: same as `volume.lvmcluster.remove_snapshots` or `false`
 		//  shortdesc: Remove snapshots as needed
 		rules["lvmcluster.remove_snapshots"] = validate.Optional(validate.IsBool)
@@ -678,6 +699,10 @@ func (d *lvm) ValidateVolume(vol Volume, removeUnknownKeys bool) error {
 
 	if d.usesThinpool() && vol.config["lvm.stripes.size"] != "" {
 		return errors.New("lvm.stripes.size cannot be used with thin pool volumes")
+	}
+
+	if d.usesThinpool() && vol.config["lvm.snapshots.chunk_size"] != "" {
+		return errors.New("lvm.snapshots.chunk_size cannot be used with thin pool volumes")
 	}
 
 	if vol.config["block.type"] == BlockVolumeTypeQcow2 && util.IsTrue(vol.config["security.shared"]) {
@@ -1392,7 +1417,8 @@ func (d *lvm) RenameVolume(vol Volume, newVolName string, op *operations.Operati
 
 // SetVolumeAccessMode switches the lock of an active volume to the given access mode.
 func (d *lvm) SetVolumeAccessMode(vol Volume, mode VolumeAccessMode) error {
-	if !d.clustered || !d.exclusiveVolume(vol) {
+	// Custom block volumes get switched both ways when their dependent setting changes.
+	if !d.clustered || vol.IsSnapshot() || (vol.volType != VolumeTypeVM && !vol.IsCustomBlock()) {
 		return nil
 	}
 

@@ -439,6 +439,13 @@ test_clustering_containers() {
     # Exec a command in the container via node1
     INCUS_DIR="${INCUS_ONE_DIR}" incus exec foo -- ls / | grep -qxF proc
 
+    # Ensure that waiting on node1 an op from node2 gets us response headers before op end.
+    op="$(curl -fsS --unix-socket "${INCUS_ONE_DIR}/unix.socket" -X POST -d '{"command": ["sleep", "5"], "wait-for-websocket": false}' incus/1.0/instances/foo/exec | jq -er .operation)"
+    headers="$(curl -fsS --max-time 15 -o "${TEST_DIR}/wait.json" -w '%{time_starttransfer}' --unix-socket "${INCUS_ONE_DIR}/unix.socket" "incus${op}/wait")"
+    [ "$(jq -r .metadata.metadata.return "${TEST_DIR}/wait.json")" = "0" ]
+    [ "${headers%%.*}" -lt 3 ]
+    rm "${TEST_DIR}/wait.json"
+
     # Pull, push and delete files from the container via node1
     ! INCUS_DIR="${INCUS_ONE_DIR}" incus file pull foo/non-existing-file "${TEST_DIR}/non-existing-file" || false
     mkdir "${TEST_DIR}/hello-world"
@@ -523,9 +530,13 @@ test_clustering_containers() {
         ! INCUS_DIR="${INCUS_TWO_DIR}" incus move egg --target node3 --stateless || false
         INCUS_DIR="${INCUS_ONE_DIR}" incus info egg | grep -q "Location: node1"
         INCUS_DIR="${INCUS_TWO_DIR}" incus stop -f egg
+
+        # Put it back where the rest of the test expects it.
+        INCUS_DIR="${INCUS_TWO_DIR}" incus move egg --target node3
+        INCUS_DIR="${INCUS_ONE_DIR}" incus info egg | grep -q "Location: node3"
     fi
 
-    # Create backup and attempt to move container. Move should fail and container should remain on node1.
+    # Create backup and attempt to move container. Move should fail and container should remain on node3.
     INCUS_DIR="${INCUS_THREE_DIR}" incus query -X POST --wait -d '{\"name\":\"foo\"}' /1.0/instances/egg/backups
     ! INCUS_DIR="${INCUS_THREE_DIR}" incus move egg --target node2 || false
     INCUS_DIR="${INCUS_THREE_DIR}" incus info egg | grep -q "Location: node3"
@@ -675,6 +686,14 @@ test_clustering_storage() {
         INCUS_DIR="${INCUS_TWO_DIR}" incus storage volume show pool1 vol2 | grep -q node2
         INCUS_DIR="${INCUS_ONE_DIR}" incus storage volume rename pool1 vol2 vol3 --target=node2
         INCUS_DIR="${INCUS_TWO_DIR}" incus storage volume show pool1 vol3 | grep -q node2
+
+        # Check volume state is reachable from a member not holding the volume.
+        INCUS_DIR="${INCUS_ONE_DIR}" incus project create statep -c features.storage.volumes=true
+        INCUS_DIR="${INCUS_ONE_DIR}" incus storage volume create pool1 volstate --project statep --target=node1
+        INCUS_DIR="${INCUS_TWO_DIR}" incus query "/1.0/storage-pools/pool1/volumes/custom/volstate/state?project=statep"
+        INCUS_DIR="${INCUS_TWO_DIR}" incus query "/1.0/storage-pools/pool1/volumes/custom/volstate/state?project=statep&target=node1"
+        INCUS_DIR="${INCUS_ONE_DIR}" incus storage volume delete pool1 volstate --project statep --target=node1
+        INCUS_DIR="${INCUS_ONE_DIR}" incus project delete statep
 
         # Delete pool and check cleaned up.
         INCUS_DIR="${INCUS_ONE_DIR}" incus storage volume delete pool1 vol1 --target=node1
@@ -3693,14 +3712,38 @@ test_clustering_groups() {
     incus project create foo -c features.images=false -c restricted=true -c restricted.cluster.groups=blah
     incus profile show default | incus profile edit default --project foo
 
-    # Check cannot create instance in restricted project that only allows blah group, when the only member that
-    # exists in the blah group also has scheduler.instance=group set (so it must be targeted via group or directly).
-    ! incus init testimage cluster:c1 --project foo || false
+    # Check that a restricted project allowing only the blah group targets it by default, reaching the member
+    # that has scheduler.instance=group set.
+    incus init testimage cluster:c1 --project foo
+    incus info cluster:c1 --project foo | grep -q "Location: node2"
+    [ "$(incus config get cluster:c1 volatile.cluster.group --project foo)" = "blah" ]
+    incus delete -f c1 --project foo
+
+    # Check that the allowed groups only apply while the project is restricted.
+    incus project set foo restricted=false
+    incus init testimage cluster:c1 --project foo
+    incus info cluster:c1 --project foo | grep -q "Location: node1"
+    [ "$(incus config get cluster:c1 volatile.cluster.group --project foo)" = "" ]
+    incus delete -f c1 --project foo
+    incus project set foo restricted=true
 
     # Check cannot create instance in restricted project when targeting a member that isn't in the restricted
     # project's allowed cluster groups list.
     ! incus init testimage cluster:c1 --project foo --target=node1 || false
     ! incus init testimage cluster:c1 --project foo --target=@foobar2 || false
+
+    # Check that a restricted project allowing several groups without any member accepting untargeted instances
+    # tells the user to target one of the groups.
+    incus cluster group create cluster:baz
+    incus cluster group assign cluster:node3 baz
+    incus project set foo restricted.cluster.groups=blah,baz
+    incus init testimage cluster:c1 --project foo 2>&1 | grep -F "target one of the project's cluster groups: blah, baz"
+    incus init testimage cluster:c1 --project foo --target=node3
+    incus info cluster:c1 --project foo | grep -q "Location: node3"
+    incus delete -f c1 --project foo
+    incus project set foo restricted.cluster.groups=blah
+    incus cluster group assign cluster:node3 default
+    incus cluster group delete cluster:baz
 
     # Check can create instance in restricted project when not targeting any specific member, but that it will only
     # be created on members within the project's allowed cluster groups list.
@@ -3807,6 +3850,11 @@ test_clustering_events() {
     INCUS_DIR="${INCUS_THREE_DIR}" stdbuf -oL incus monitor --type=lifecycle > "${TEST_DIR}/node3.log" &
     monitorNode3PID=$!
 
+    # Monitor a specific member through another one.
+    ! INCUS_DIR="${INCUS_ONE_DIR}" incus monitor --target node9 || false
+    INCUS_DIR="${INCUS_ONE_DIR}" stdbuf -oL incus monitor --target node2 --type=lifecycle > "${TEST_DIR}/target.log" &
+    monitorTargetPID=$!
+
     # Restart instance generating restart lifecycle event.
     INCUS_DIR="${INCUS_ONE_DIR}" incus restart -f c1
     INCUS_DIR="${INCUS_THREE_DIR}" incus restart -f c2
@@ -3817,6 +3865,11 @@ test_clustering_events() {
         cat "${TEST_DIR}/node${i}.log"
         grep -Fc "instance-restarted" "${TEST_DIR}/node${i}.log" | grep -Fx 2
     done
+
+    # Check the targeted stream got the events too.
+    grep -Fc "instance-restarted" "${TEST_DIR}/target.log" | grep -Fx 2
+    grep -Fc "location: node2" "${TEST_DIR}/target.log" | grep -Fx 1
+    kill -9 ${monitorTargetPID} || true
 
     # Switch into event-hub mode.
     INCUS_DIR="${INCUS_ONE_DIR}" incus cluster role add node1 event-hub

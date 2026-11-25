@@ -41,6 +41,17 @@ type BackupTarget struct {
 	Region string `json:"region,omitempty" yaml:"region,omitempty"`
 }
 
+// BackupSource represents a remote backup to import.
+//
+// swagger:model
+//
+// API extension: storage_volume_backup_import.
+type BackupSource struct {
+	// URL of the backup tarball (HTTP or HTTPS)
+	// Example: https://storage.googleapis.com/my-bucket/backup.tar.gz?X-Goog-Signature=abcd
+	URL string `json:"url" yaml:"url"`
+}
+
 // InstanceBackupsPost represents the fields available for a new instance backup.
 //
 // swagger:model

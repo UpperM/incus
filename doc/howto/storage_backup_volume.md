@@ -24,8 +24,9 @@ If you have a separate, network-connected Incus server available, regularly copy
 
 ```{note}
 Custom storage volumes might be attached to an instance, but they are not part of the instance.
-Therefore, the content of a custom storage volume is not stored when you {ref}`back up your instance <instances-backup>`.
-You must back up the data of your storage volume separately.
+Therefore, the content of a custom storage volume is not stored when you {ref}`back up your instance <instances-backup>`, unless the volume is attached with `dependent=true`.
+Such a volume is included in the snapshots and export files of the instance.
+You must back up the data of all other storage volumes separately.
 ```
 
 (storage-backup-snapshots)=
@@ -94,6 +95,7 @@ See the {ref}`storage-drivers` documentation for more information about those co
 ### Restore a snapshot of a custom storage volume
 
 You can restore a custom storage volume to the state of any of its snapshots.
+However, only the most recent snapshot can be restored for block volumes on `lvmcluster` storage pools and on the storage drivers that cannot restore older snapshots (see {ref}`storage-drivers-features`), unless the `remove_snapshots` option of the driver (for example, `lvmcluster.remove_snapshots`) is set, in which case the newer snapshots are deleted.
 
 To do so, you must first stop all instances that use the storage volume.
 Then use the following command:
@@ -152,3 +154,10 @@ To do so, use the following command:
 If you do not specify a volume name, the original name of the exported storage volume is used for the new volume.
 If a volume with that name already (or still) exists in the specified storage pool, the command returns an error.
 In that case, either delete the existing volume before importing the backup or specify a different volume name for the import.
+
+Instead of a local file, you can pass an HTTP or HTTPS URL (for example, a pre-signed URL to an object storage bucket).
+The Incus server then downloads the export file itself:
+
+    incus storage volume import <pool_name> <url> [<volume_name>]
+
+In a restricted project, the server hosting the backup must be listed in the {config:option}`project-restricted:restricted.backups.servers` project configuration option.

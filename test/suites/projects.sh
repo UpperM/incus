@@ -23,6 +23,9 @@ test_projects_crud() {
     # Trying to create a project with the same name fails
     ! incus project create foo || false
 
+    # Monitoring a missing project fails with a clear error
+    incus monitor --project bar 2>&1 | grep -xF "Error: Project not found"
+
     # Trying to create a project containing an underscore fails
     ! incus project create foo_banned || false
 
@@ -1044,7 +1047,21 @@ test_projects_restrictions() {
     # because there's an instance with security.nesting=true.
     ! incus project set p1 restricted.containers.nesting=block || false
 
+    # Restrictions are only checked while the project is restricted.
+    incus project set p1 restricted=false
+    incus project set p1 restricted.containers.nesting=block
+    incus project set p1 restricted.containers.nesting=allow
+    incus project set p1 restricted=true
+
     incus delete c1
+
+    # It's not possible to restrict a project holding an instance that conflicts
+    # with the restrictions.
+    incus project set p1 restricted=false
+    incus init testimage c1 -c security.privileged=true
+    ! incus project set p1 restricted=true || false
+    incus delete c1
+    incus project set p1 restricted=true
 
     # Setting restricted.containers.lowlevel to 'allow' makes it possible to set
     # low-level options.

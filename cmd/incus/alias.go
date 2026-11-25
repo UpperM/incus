@@ -1,9 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"os"
-	"sort"
+	"maps"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +15,11 @@ import (
 
 type cmdAlias struct {
 	global *cmdGlobal
+}
+
+type aliasRowData struct {
+	alias  string
+	target string
 }
 
 func (c *cmdAlias) command() *cobra.Command {
@@ -29,7 +34,7 @@ func (c *cmdAlias) command() *cobra.Command {
 	cmd.AddCommand(aliasAddCmd.command())
 
 	// List
-	aliasListCmd := cmdAliasList{global: c.global, alias: c}
+	aliasListCmd := cmdAliasList{global: c.global, alias: c, lister: &listable[aliasRowData]{global: c.global}}
 	cmd.AddCommand(aliasListCmd.command())
 
 	// Rename
@@ -103,8 +108,7 @@ func (c *cmdAliasAdd) run(cmd *cobra.Command, args []string) error {
 type cmdAliasList struct {
 	global *cmdGlobal
 	alias  *cmdAlias
-
-	flagFormat string
+	lister *listable[aliasRowData]
 }
 
 var cmdAliasListUsage = u.Usage{}
@@ -114,12 +118,12 @@ func (c *cmdAliasList) command() *cobra.Command {
 	cmd.Use = cli.U("list", cmdAliasListUsage...)
 	cmd.Aliases = []string{"ls"}
 	cmd.Short = i18n.G("List aliases")
-	cmd.Long = cli.FormatSection(color.DescriptionPrefix, i18n.G(`List aliases`))
-	cli.AddStringFlag(cmd.Flags(), &c.flagFormat, "format|f", c.global.defaultListFormat(), "", i18n.G(`Format (csv|json|table|yaml|compact|markdown), use suffix ",noheader" to disable headers and ",header" to enable it if missing, e.g. csv,header`))
+	cmd.Long = cli.FormatSection(color.DescriptionPrefix, i18n.G("List aliases"))
 
-	cmd.PreRunE = func(cmd *cobra.Command, _ []string) error {
-		return cli.ValidateFlagFormatForListOutput(cmd.Flag("format").Value.String())
-	}
+	c.lister.init(cmd, "at", map[rune]listColumn[aliasRowData]{
+		'a': {i18n.G("ALIAS"), i18n.G("Alias"), func(v aliasRowData) string { return v.alias }},
+		't': {i18n.G("TARGET"), i18n.G("Target command"), func(v aliasRowData) string { return v.target }},
+	})
 
 	cmd.RunE = c.run
 
@@ -136,27 +140,14 @@ func (c *cmdAliasList) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// List the aliases
-	data := [][]string{}
-	for k, v := range conf.Aliases {
-		data = append(data, []string{k, v})
+	rawAliases := maps.Clone(defaultAliases)
+	maps.Copy(rawAliases, conf.Aliases)
+	aliases := make([]aliasRowData, 0, len(rawAliases))
+	for k, v := range rawAliases {
+		aliases = append(aliases, aliasRowData{k, v})
 	}
 
-	// Apply default entries.
-	for k, v := range defaultAliases {
-		_, ok := conf.Aliases[k]
-		if !ok {
-			data = append(data, []string{k, v})
-		}
-	}
-
-	sort.Sort(cli.SortColumnsNaturally(data))
-
-	header := []string{
-		i18n.G("ALIAS"),
-		i18n.G("TARGET"),
-	}
-
-	return cli.RenderTable(os.Stdout, c.flagFormat, header, data, conf.Aliases)
+	return c.lister.run(aliases, rawAliases)
 }
 
 // Rename.
@@ -220,7 +211,7 @@ type cmdAliasRemove struct {
 	alias  *cmdAlias
 }
 
-var cmdAliasRemoveUsage = u.Usage{u.Alias}
+var cmdAliasRemoveUsage = u.Usage{u.Alias.List(1)}
 
 func (c *cmdAliasRemove) command() *cobra.Command {
 	cmd := &cobra.Command{}
@@ -247,17 +238,31 @@ func (c *cmdAliasRemove) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	alias := parsed[0].String
+	var errs []error
+	changed := false
+	for _, alias := range parsed[0].StringList {
+		// Look for the alias
+		_, ok := conf.Aliases[alias]
+		if !ok {
+			_, ok := defaultAliases[alias]
+			if ok {
+				errs = append(errs, fmt.Errorf(i18n.G("Alias %s is built-in and cannot be removed"), alias))
+			} else {
+				errs = append(errs, fmt.Errorf(i18n.G("Alias %s doesn't exist"), alias))
+			}
 
-	// Look for the alias
-	_, ok := conf.Aliases[alias]
-	if !ok {
-		return fmt.Errorf(i18n.G("Alias %s doesn't exist"), alias)
+			continue
+		}
+
+		// Delete the alias
+		delete(conf.Aliases, alias)
+		changed = true
 	}
 
-	// Delete the alias
-	delete(conf.Aliases, alias)
+	if changed {
+		// Save the config
+		errs = append(errs, conf.SaveConfig(c.global.confPath))
+	}
 
-	// Save the config
-	return conf.SaveConfig(c.global.confPath)
+	return errors.Join(errs...)
 }

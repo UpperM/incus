@@ -450,9 +450,28 @@ func AllowVolumeCreation(tx *db.ClusterTx, projectName string, poolName string, 
 		return nil
 	}
 
-	// Restricted projects aren't allowed to use pull migration.
-	if util.IsTrue(info.Project.Config["restricted"]) && req.Source.Type == "migration" && req.Source.Mode == "pull" {
-		return errors.New("Restricted projects aren't allowed to use pull mode migration")
+	// Restricted projects aren't allowed to use pull migration or backup servers outside their allow list.
+	if util.IsTrue(info.Project.Config["restricted"]) {
+		if req.Source.Type == "migration" && req.Source.Mode == "pull" {
+			return errors.New("Restricted projects aren't allowed to use pull mode migration")
+		}
+
+		if req.Source.Type == "backup" {
+			u, err := url.Parse(req.Source.Backup.URL)
+			if err != nil {
+				return err
+			}
+
+			err = CheckBackupSourceURL(info.Project.Config, u)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// The size of an imported backup is only known once downloaded, where the project's disk budget applies.
+	if req.Source.Type == "backup" {
+		return nil
 	}
 
 	err = checkRestrictedVolumeConfig(tx, info, poolName, req.Config, nil)
@@ -470,6 +489,21 @@ func AllowVolumeCreation(tx *db.ClusterTx, projectName string, poolName string, 
 	err = checkRestrictionsAndAggregateLimits(tx, info)
 	if err != nil {
 		return fmt.Errorf("Failed checking if volume creation allowed: %w", err)
+	}
+
+	return nil
+}
+
+// CheckBackupSourceURL returns an error if a restricted project isn't allowed to import a backup from u.
+func CheckBackupSourceURL(projectConfig map[string]string, u *url.URL) error {
+	if !util.IsTrue(projectConfig["restricted"]) {
+		return nil
+	}
+
+	servers := util.SplitNTrimSpace(projectConfig["restricted.backups.servers"], ",", -1, true)
+	allowed := slices.ContainsFunc(servers, func(server string) bool { return strings.EqualFold(server, u.Host) })
+	if !allowed {
+		return api.StatusErrorf(http.StatusForbidden, "Backup server %q isn't allowed in this project", u.Host)
 	}
 
 	return nil
@@ -1164,6 +1198,7 @@ var allAggregateLimits = []string{
 // allRestrictions lists all available 'restrict.*' config keys along with their default setting.
 var allRestrictions = map[string]string{
 	"restricted.backups":                   "block",
+	"restricted.backups.servers":           "",
 	"restricted.cluster.groups":            "",
 	"restricted.cluster.target":            "block",
 	"restricted.containers.nesting":        "block",
@@ -1474,8 +1509,14 @@ func AllowProjectUpdate(tx *db.ClusterTx, projectName string, config map[string]
 	// instances.
 	aggregateKeys := []string{}
 
-	for _, key := range changed {
-		if strings.HasPrefix(key, "restricted.") {
+	// Restrictions only apply to restricted projects, so only check them there.
+	if util.IsTrue(config["restricted"]) {
+		for _, key := range changed {
+			// Turning restrictions on checks the existing content too.
+			if !strings.HasPrefix(key, "restricted.") && key != "restricted" {
+				continue
+			}
+
 			project := api.Project{
 				Name: projectName,
 				ProjectPut: api.ProjectPut{
@@ -1488,9 +1529,11 @@ func AllowProjectUpdate(tx *db.ClusterTx, projectName string, config map[string]
 				return fmt.Errorf("Conflict detected when changing %q in project %q: %w", key, projectName, err)
 			}
 
-			continue
+			break
 		}
+	}
 
+	for _, key := range changed {
 		switch key {
 		case "limits.instances":
 			err := validateTotalInstanceCountLimit(info.Instances, config[key], projectName)
@@ -2097,16 +2140,29 @@ func AllowSnapshotCreation(p *api.Project) error {
 	return nil
 }
 
-// GetRestrictedClusterGroups returns a slice of restricted cluster groups for the given project.
+// GetRestrictedClusterGroups returns the cluster groups a restricted project is limited to.
 func GetRestrictedClusterGroups(p *api.Project) []string {
+	if util.IsFalseOrEmpty(p.Config["restricted"]) {
+		return nil
+	}
+
 	return util.SplitNTrimSpace(p.Config["restricted.cluster.groups"], ",", -1, true)
+}
+
+// NoCandidateMemberError returns the error for an instance that couldn't be placed on any cluster member.
+func NoCandidateMemberError(p *api.Project) error {
+	clusterGroupsAllowed := GetRestrictedClusterGroups(p)
+	if len(clusterGroupsAllowed) > 1 {
+		return api.StatusErrorf(http.StatusBadRequest, "Couldn't find a cluster member for the instance, target one of the project's cluster groups: %s", strings.Join(clusterGroupsAllowed, ", "))
+	}
+
+	return api.StatusErrorf(http.StatusInternalServerError, "Couldn't find a cluster member for the instance")
 }
 
 // AllowClusterMember returns nil if the given project is allowed to use the cluster member.
 func AllowClusterMember(p *api.Project, member *db.NodeInfo) error {
 	clusterGroupsAllowed := GetRestrictedClusterGroups(p)
-
-	if util.IsTrue(p.Config["restricted"]) && len(clusterGroupsAllowed) > 0 {
+	if len(clusterGroupsAllowed) > 0 {
 		for _, memberGroupName := range member.Groups {
 			if slices.Contains(clusterGroupsAllowed, memberGroupName) {
 				return nil
@@ -2122,12 +2178,6 @@ func AllowClusterMember(p *api.Project, member *db.NodeInfo) error {
 // AllowClusterGroup returns nil if the given project is allowed to use the cluster groupName.
 func AllowClusterGroup(p *api.Project, groupName string) error {
 	clusterGroupsAllowed := GetRestrictedClusterGroups(p)
-
-	// Skip the check if the project is not restricted
-	if util.IsFalseOrEmpty(p.Config["restricted"]) {
-		return nil
-	}
-
 	if len(clusterGroupsAllowed) > 0 && !slices.Contains(clusterGroupsAllowed, groupName) {
 		return fmt.Errorf("Project isn't allowed to use this cluster group: %q", groupName)
 	}
@@ -2189,6 +2239,14 @@ func CheckTarget(ctx context.Context, authorizer auth.Authorizer, r *http.Reques
 		targetGroupName = after
 	} else {
 		targetMemberName = target
+	}
+
+	// A project restricted to a single cluster group targets it by default.
+	if target == "" {
+		clusterGroupsAllowed := GetRestrictedClusterGroups(p)
+		if len(clusterGroupsAllowed) == 1 {
+			targetGroupName = clusterGroupsAllowed[0]
+		}
 	}
 
 	// Check manual cluster member targeting restrictions.

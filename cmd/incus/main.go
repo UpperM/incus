@@ -263,7 +263,7 @@ Custom commands can be defined through aliases, use "incus alias" to control tho
 	app.AddCommand(launchCmd.command())
 
 	// list sub-command
-	listCmd := cmdList{global: &globalCmd}
+	listCmd := cmdList{global: &globalCmd, lister: &listable[instanceWithRemote]{global: &globalCmd}}
 	app.AddCommand(listCmd.command())
 
 	// manpage sub-command
@@ -351,7 +351,7 @@ Custom commands can be defined through aliases, use "incus alias" to control tho
 	app.AddCommand(versionCmd.command())
 
 	// top sub-command
-	topCmd := cmdTop{global: &globalCmd}
+	topCmd := cmdTop{global: &globalCmd, lister: &listable[displayData]{global: &globalCmd}}
 	app.AddCommand(topCmd.command())
 
 	// warning sub-command
@@ -552,6 +552,15 @@ func (c *cmdGlobal) preRun(cmd *cobra.Command, _ []string) error {
 
 	c.confPath = c.conf.ConfigPath("config.yml")
 
+	// Create the config dir so that we don't get in here again for this user.
+	if !c.flagForceLocal && !util.PathExists(c.confPath) {
+		err = os.MkdirAll(c.conf.ConfigDir, 0o750)
+		if err != nil {
+			// Treat an unwritable config dir like a missing one.
+			c.flagForceLocal = true
+		}
+	}
+
 	// Set cache directory in config.
 	c.conf.CacheDir = cachePath
 
@@ -574,12 +583,6 @@ func (c *cmdGlobal) preRun(cmd *cobra.Command, _ []string) error {
 	// if the server has been properly configured.  Don't display the message if the var path
 	// does not exist (server missing), as the user may be targeting a remote daemon.
 	if !c.flagForceLocal && !util.PathExists(c.confPath) {
-		// Create the config dir so that we don't get in here again for this user.
-		err = os.MkdirAll(c.conf.ConfigDir, 0o750)
-		if err != nil {
-			return err
-		}
-
 		// Handle local servers.
 		if util.PathExists(internalUtil.VarPath("")) {
 			// Attempt to connect to the local server

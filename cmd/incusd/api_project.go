@@ -857,7 +857,25 @@ func projectChange(ctx context.Context, s *state.State, project *api.Project, re
 			}
 		}
 
-		err := projecthelpers.AllowProjectUpdate(tx, project.Name, req.Config, configChanged)
+		// Keep the shared parents of the project's OVN networks available.
+		projectNetworks, err := tx.GetCreatedNetworksByProject(ctx, project.Name)
+		if err != nil {
+			return err
+		}
+
+		newProject := api.Project{Name: project.Name, ProjectPut: req}
+		for _, network := range projectNetworks {
+			parent := network.Config["parent"]
+			if network.Type != "ovn" || parent == "" || !projecthelpers.NetworkSharedFromDefault(project, parent) {
+				continue
+			}
+
+			if !projecthelpers.NetworkSharedFromDefault(&newProject, parent) {
+				return api.StatusErrorf(http.StatusBadRequest, "Network %q uses %q as parent, which would no longer be shared with the project", network.Name, parent)
+			}
+		}
+
+		err = projecthelpers.AllowProjectUpdate(tx, project.Name, req.Config, configChanged)
 		if err != nil {
 			return err
 		}
@@ -976,6 +994,10 @@ func projectPost(d *Daemon, r *http.Request) response.Response {
 
 			project, err = cluster.GetProject(ctx, tx.Tx(), name)
 			if err != nil {
+				if api.StatusErrorCheck(err) {
+					return err
+				}
+
 				return fmt.Errorf("Failed loading project %q: %w", name, err)
 			}
 
@@ -1090,7 +1112,11 @@ func projectDelete(d *Daemon, r *http.Request) response.Response {
 	err = s.DB.Cluster.Transaction(r.Context(), func(ctx context.Context, tx *db.ClusterTx) error {
 		project, err := cluster.GetProject(ctx, tx.Tx(), name)
 		if err != nil {
-			return fmt.Errorf("Fetch project %q: %w", name, err)
+			if api.StatusErrorCheck(err) {
+				return err
+			}
+
+			return fmt.Errorf("Failed loading project %q: %w", name, err)
 		}
 
 		if !force {
@@ -1636,7 +1662,7 @@ func projectValidateConfig(s *state.State, config map[string]string) error {
 		"features.images": validate.Optional(validate.IsBool),
 
 		// gendoc:generate(entity=project, group=features, key=features.storage.volumes)
-		//
+		// When disabled, the project shares the storage volumes of the `default` project.
 		// ---
 		//  type: bool
 		//  defaultdesc: `false`
@@ -1645,7 +1671,7 @@ func projectValidateConfig(s *state.State, config map[string]string) error {
 		"features.storage.volumes": validate.Optional(validate.IsBool),
 
 		// gendoc:generate(entity=project, group=features, key=features.storage.buckets)
-		//
+		// When disabled, the project shares the buckets of the `default` project.
 		// ---
 		//  type: bool
 		//  defaultdesc: `false`
@@ -1790,8 +1816,17 @@ func projectValidateConfig(s *state.State, config map[string]string) error {
 		//  shortdesc: Whether to prevent creating instance or volume backups
 		"restricted.backups": isEitherAllowOrBlock,
 
+		// gendoc:generate(entity=project, group=restricted, key=restricted.backups.servers)
+		// Specify a comma-delimited list of servers (`host` or `host:port`, as they appear in the URL) from which backups can be imported.
+		// If this option is not set, a restricted project can't import backups from a URL.
+		// ---
+		//  type: string
+		//  shortdesc: Servers that backups can be imported from
+		"restricted.backups.servers": validate.Optional(validate.IsListOf(validate.IsAny)),
+
 		// gendoc:generate(entity=project, group=restricted, key=restricted.cluster.groups)
 		// If specified, this option prevents targeting cluster groups other than the provided ones.
+		// When a single group is listed, instances created without a target are placed in that group.
 		// ---
 		//  type: string
 		//  shortdesc: Cluster groups that can be targeted
@@ -2022,7 +2057,8 @@ func projectValidateConfig(s *state.State, config map[string]string) error {
 		//
 		// In restricted projects with {config:option}`project-features:features.networks` enabled,
 		// the listed networks from the default project are shared into the project and their names
-		// can't be used for the project's own networks.
+		// can't be used for the project's own networks. A shared OVN network can be the `parent` of
+		// the project's own OVN networks.
 		//
 		// Note that this setting depends on the {config:option}`project-restricted:restricted.devices.nic` setting.
 		// ---

@@ -172,6 +172,7 @@ LRU
 LTS
 LV
 LVM
+LVM's
 LXC
 LXCFS
 LXC's
@@ -363,6 +364,7 @@ unmanaged
 unmount
 unmounting
 untagged
+untrusted
 uplink
 uptime
 URI

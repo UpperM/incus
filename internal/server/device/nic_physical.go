@@ -132,7 +132,16 @@ func (d *nicPhysical) validateConfig(instConf instance.ConfigReader, partialVali
 		//  managed: no
 		//  condition: container
 		//  shortdesc: Comma-delimited list of VLAN IDs or VLAN ranges to join for tagged traffic
-		optionalFields = append(optionalFields, "gvrp", "hwaddr", "mtu", "vlan", "vlan.tagged")
+
+		// gendoc:generate(entity=devices, group=nic_physical, key=vlan.ingress)
+		// Used for private VLANs where the instance sends on the untagged VLAN (`vlan`) and gets its return traffic on the ingress VLAN.
+		// Only supported when the parent is a native Linux bridge.
+		// ---
+		//  type: integer
+		//  managed: no
+		//  condition: container
+		//  shortdesc: The ingress VLAN ID to also receive non-tagged traffic from (requires `vlan` and `security.mac_filtering`)
+		optionalFields = append(optionalFields, "gvrp", "hwaddr", "mtu", "vlan", "vlan.ingress", "vlan.tagged")
 	}
 
 	// gendoc:generate(entity=devices, group=nic_physical, key=network)
@@ -143,7 +152,7 @@ func (d *nicPhysical) validateConfig(instConf instance.ConfigReader, partialVali
 	//  shortdesc: The managed network to link the device to (instead of specifying the `nictype` directly)
 	if d.config["network"] != "" {
 		// List of properties we import from the parent network.
-		networkFields := []string{"gvrp", "mtu", "vlan", "vlan.tagged"}
+		networkFields := []string{"gvrp", "mtu", "vlan", "vlan.ingress", "vlan.tagged"}
 
 		requiredFields = append(requiredFields, "network")
 
@@ -182,28 +191,24 @@ func (d *nicPhysical) validateConfig(instConf instance.ConfigReader, partialVali
 				d.config[field] = netConfig[field]
 			}
 		}
-
-		// Check if the parent is a bridge.
-		isParentBridge := d.config["parent"] != "" && network.IsNativeBridge(d.config["parent"])
-		if isParentBridge {
-			// Validate the NIC as if bridged.
-			bridgedConfig := d.config.Clone()
-			bridgedConfig["type"] = "nic"
-			bridgedConfig["nictype"] = "bridged"
-			bridgedConfig["network"] = ""
-
-			// Instantiate the new device.
-			bridged, err := load(nil, d.state, instConf.Project().Name, d.name, bridgedConfig, nil, nil)
-			if err != nil {
-				return fmt.Errorf("Failed to initialize bridged device: %w", err)
-			}
-
-			// Forward the validateConfig call.
-			return bridged.validateConfig(instConf, partialValidation)
-		}
 	} else {
 		// If no network property supplied, then parent property is required.
 		requiredFields = append(requiredFields, "parent")
+	}
+
+	// A bridge parent is handled as a bridged NIC, so validate it as one.
+	if d.config["parent"] != "" && network.IsNativeBridge(d.config["parent"]) {
+		bridgedConfig := d.config.Clone()
+		bridgedConfig["type"] = "nic"
+		bridgedConfig["nictype"] = "bridged"
+		bridgedConfig["network"] = ""
+
+		bridged, err := load(nil, d.state, instConf.Project().Name, d.name, bridgedConfig, nil, nil)
+		if err != nil {
+			return fmt.Errorf("Failed to initialize bridged device: %w", err)
+		}
+
+		return bridged.validateConfig(instConf, partialValidation)
 	}
 
 	err := d.config.Validate(nicValidationRules(requiredFields, optionalFields, instConf))
@@ -223,6 +228,10 @@ func (d *nicPhysical) validateEnvironment() error {
 
 	if d.inst.Type() == instancetype.Container && d.config["name"] == "" {
 		return errors.New("Requires name property to start")
+	}
+
+	if d.config["vlan.ingress"] != "" && !isParentBridge {
+		return errors.New("Ingress VLAN is only supported on native Linux bridges")
 	}
 
 	if !network.InterfaceExists(d.config["parent"]) {
@@ -587,6 +596,10 @@ func IsPhysicalNICWithBridge(s *state.State, deviceProjectName string, d deviceC
 		}
 
 		return network.IsNativeBridge(parent)
+	}
+
+	if d["parent"] != "" {
+		return network.IsNativeBridge(d["parent"])
 	}
 
 	return false
